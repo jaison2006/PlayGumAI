@@ -12,6 +12,9 @@ export default defineConfig(({ mode }) => {
   base: '/PlayGumAI/',
 
   build: {
+    sourcemap: emitSourcemaps ? 'inline' : false,
+    minify: !emitSourcemaps,
+  },
       sourcemap: emitSourcemaps ? 'inline' : false,
       minify: !emitSourcemaps,
     },
