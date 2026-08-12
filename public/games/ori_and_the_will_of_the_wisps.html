@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PlayGumAI — Ori: Lumina Drift</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#020914;color:#eaffff;font-family:Arial,Segoe UI,sans-serif}
+canvas{display:block;width:100%;height:100%}
+#ui{position:fixed;inset:0;pointer-events:none}
+.card{background:rgba(3,14,24,.88);border:1px solid rgba(160,245,255,.24);box-shadow:0 12px 40px #000b,inset 0 1px #fff2;backdrop-filter:blur(8px)}
+#info{position:absolute;left:18px;top:18px;padding:13px 16px;border-radius:12px;min-width:300px}
+.small{font-size:9px;letter-spacing:3px;color:#73e8fa}
+h2{margin:5px 0;font-size:21px}
+#goal{font-size:13px;color:#b8dce4;line-height:1.4}
+#stats{font-size:11px;color:#80b4be;margin-top:8px}
+#exit{position:absolute;right:18px;top:18px;pointer-events:auto;border:1px solid #fff;background:linear-gradient(#fff,#b9d9df);color:#031017;border-radius:9px;padding:10px 18px;font-weight:bold;cursor:pointer}
+#exit:hover{filter:brightness(1.1)}
+#controls{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);padding:9px 14px;border-radius:9px;font-size:11px;color:#9cc9d1;white-space:nowrap}
+#power{position:absolute;right:18px;bottom:18px;width:220px;padding:11px;border-radius:10px}
+.lab{font-size:9px;letter-spacing:2px;color:#86b8c0}
+.bar{height:7px;background:#0b2029;border-radius:9px;margin:5px 0 9px;overflow:hidden}
+.fill{height:100%}
+#hp{background:linear-gradient(90deg,#6eeeff,#e9ffff)}
+#energy{background:linear-gradient(90deg,#55cfff,#c9fbff)}
+#overlay{position:fixed;inset:0;background:#00101acc;display:none;align-items:center;justify-content:center;pointer-events:auto}
+#modal{width:min(500px,90vw);padding:34px;border-radius:17px;text-align:center}
+#modal h1{margin:0 0 9px;font-size:34px;letter-spacing:2px}
+#modal p{color:#b5d3d9;line-height:1.5}
+button.action{padding:10px 18px;border-radius:8px;font-weight:bold;cursor:pointer;margin-top:12px}
+#restart{background:#091923;color:#fff;border:1px solid #66858d}
+#back{margin-left:8px;background:linear-gradient(#fff,#b9d9df);border:1px solid #fff}
+@media(max-width:650px){
+ #info{left:9px;top:9px;min-width:0;width:calc(100% - 18px)}
+ #exit{top:105px;right:9px}
+ #controls{white-space:normal;width:90%;text-align:center;bottom:105px}
+ #power{left:50%;right:auto;transform:translateX(-50%);bottom:12px;width:80%}
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="ui">
+ <div id="info" class="card">
+  <div class="small">PLAYGUMAI // LUMINA DRIFT</div>
+  <h2>SPIRIT CURRENT</h2>
+  <div id="goal">Ride the wind currents and light 8 memory flowers.</div>
+  <div id="stats">Flowers: <span id="flowers">0/8</span> · Motes: <span id="motes">0</span> · Score: <span id="score">0</span></div>
+ </div>
+ <button id="exit">EXIT GAME</button>
+ <div id="controls" class="card">A/D or ←/→ MOVE · W/↑/SPACE JUMP · SHIFT WIND DASH · E SPIRIT PULSE</div>
+ <div id="power" class="card">
+  <div class="lab">SPIRIT LIFE</div><div class="bar"><div id="hp" class="fill"></div></div>
+  <div class="lab">WIND ENERGY</div><div class="bar"><div id="energy" class="fill"></div></div>
+ </div>
+</div>
+
+<div id="overlay">
+ <div id="modal" class="card">
+  <h1 id="resultTitle"></h1>
+  <p id="resultText"></p>
+  <button id="restart" class="action">RESTART</button>
+  <button id="back" class="action">EXIT GAME</button>
+ </div>
+</div>
+
+<script>
+const canvas=document.getElementById("c");
+const ctx=canvas.getContext("2d");
+let W=innerWidth,H=innerHeight,dpr=1;
+function resize(){
+ W=innerWidth;H=innerHeight;dpr=Math.min(devicePixelRatio||1,2);
+ canvas.width=W*dpr;canvas.height=H*dpr;
+ canvas.style.width=W+"px";canvas.style.height=H+"px";
+ ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+addEventListener("resize",resize);resize();
+
+const keys=Object.create(null);
+addEventListener("keydown",e=>{
+ const k=e.key.toLowerCase(); keys[k]=true;
+ if(["arrowleft","arrowright","arrowup","arrowdown"," "].includes(k))e.preventDefault();
+ if(k==="escape")exitGame();
+});
+addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+
+let p,platforms,flowers,motes,thorns,particles,score,moteCount,gameOver,won;
+let dashCooldown=0,pulseCooldown=0,last=0;
+
+function reset(){
+ p={x:100,y:H-150,w:24,h:36,vx:0,vy:0,hp:100,energy:100,ground:false,inv:0};
+ platforms=[
+  {x:-30,y:H-45,w:W+60,h:45},
+  {x:70,y:H-155,w:210,h:15},
+  {x:350,y:H-260,w:210,h:15},
+  {x:650,y:H-170,w:230,h:15},
+  {x:930,y:H-300,w:210,h:15},
+  {x:1180,y:H-205,w:230,h:15},
+  {x:1450,y:H-330,w:230,h:15},
+  {x:1730,y:H-220,w:260,h:15},
+  {x:2050,y:H-350,w:230,h:15}
+ ];
+ flowers=[
+  {x:160,y:H-185,on:false},
+  {x:445,y:H-290,on:false},
+  {x:760,y:H-200,on:false},
+  {x:1015,y:H-330,on:false},
+  {x:1280,y:H-235,on:false},
+  {x:1540,y:H-360,on:false},
+  {x:1840,y:H-250,on:false},
+  {x:2160,y:H-380,on:false}
+ ];
+ motes=[
+  {x:290,y:H-215,vx:35,vy:0,on:true},
+  {x:590,y:H-335,vx:-30,vy:15,on:true},
+  {x:900,y:H-230,vx:30,vy:-10,on:true},
+  {x:1380,y:H-270,vx:-35,vy:10,on:true},
+  {x:1980,y:H-285,vx:35,vy:0,on:true}
+ ];
+ thorns=[
+  {x:300,y:H-60,w:80,h:15},
+  {x:850,y:H-185,w:75,h:15},
+  {x:1130,y:H-60,w:90,h:15},
+  {x:1650,y:H-60,w:100,h:15},
+  {x:1990,y:H-235,w:80,h:15}
+ ];
+ particles=[];
+ score=0;moteCount=0;gameOver=false;won=false;
+ dashCooldown=0;pulseCooldown=0;
+ document.getElementById("overlay").style.display="none";
+ updateUI();
+}
+
+function burst(x,y,n=16){
+ for(let i=0;i<n;i++){
+  let a=Math.random()*Math.PI*2,s=30+Math.random()*140;
+  particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.3+Math.random()*.7});
+ }
+}
+
+function doDash(){
+ if(dashCooldown>0||p.energy<25||gameOver||won)return;
+ dashCooldown=.55;p.energy-=25;p.inv=.25;
+ const dir=(keys.a||keys.arrowleft)?-1:1;
+ p.vx=dir*600;p.vy=-120;
+ burst(p.x+p.w/2,p.y+p.h/2,24);
+}
+
+function doPulse(){
+ if(pulseCooldown>0||p.energy<18||gameOver||won)return;
+ pulseCooldown=.5;p.energy-=18;
+ const px=p.x+p.w/2,py=p.y+p.h/2;
+ burst(px,py,25);
+ thorns=thorns.filter(t=>{
+  const tx=t.x+t.w/2,ty=t.y;
+  if(Math.hypot(px-tx,py-ty)<150){score+=80;return false}
+  return true;
+ });
+}
+
+function update(dt){
+ if(gameOver||won)return;
+
+ dashCooldown=Math.max(0,dashCooldown-dt);
+ pulseCooldown=Math.max(0,pulseCooldown-dt);
+ p.inv=Math.max(0,p.inv-dt);
+
+ let dir=0;
+ if(keys.a||keys.arrowleft)dir--;
+ if(keys.d||keys.arrowright)dir++;
+ p.vx+=dir*900*dt;
+ p.vx*=Math.pow(.001,dt);
+ p.vx=Math.max(-270,Math.min(270,p.vx));
+
+ if((keys.w||keys.arrowup||keys[" "])&&p.ground){
+  p.vy=-540;p.ground=false;
+  keys.w=keys.arrowup=keys[" "]=false;
+ }
+ if(keys.shift){doDash();keys.shift=false}
+ if(keys.e){doPulse();keys.e=false}
+
+ const gliding=!p.ground&&(keys.w||keys.arrowup||keys[" "]);
+ p.vy+=(gliding?250:1350)*dt;
+ if(gliding)p.energy=Math.max(0,p.energy-10*dt);
+
+ p.x+=p.vx*dt;p.y+=p.vy*dt;
+ p.x=Math.max(0,Math.min(W-p.w,p.x));
+ p.ground=false;
+
+ platforms.forEach(q=>{
+  if(p.x+p.w>q.x&&p.x<q.x+q.w&&p.y+p.h>=q.y&&p.y+p.h<=q.y+25&&p.vy>=0){
+   p.y=q.y-p.h;p.vy=0;p.ground=true;
+  }
+ });
+
+ flowers.forEach(f=>{
+  if(!f.on&&Math.hypot(p.x+p.w/2-f.x,p.y+p.h/2-f.y)<35){
+   f.on=true;score+=250;p.energy=Math.min(100,p.energy+22);burst(f.x,f.y,30);
+  }
+ });
+
+ motes.forEach(m=>{
+  if(!m.on)return;
+  m.x+=m.vx*dt;m.y+=m.vy*dt;
+  if(m.x<50||m.x>W-50)m.vx*=-1;
+  if(m.y<90||m.y>H-100)m.vy*=-1;
+  if(Math.hypot(p.x+p.w/2-m.x,p.y+p.h/2-m.y)<28){
+   m.on=false;moteCount++;score+=100;burst(m.x,m.y,16);
+  }
+ });
+
+ thorns.forEach(t=>{
+  if(p.x+p.w>t.x&&p.x<t.x+t.w&&p.y+p.h>t.y-8&&p.y<t.y+10&&!p.inv){
+   p.hp-=45*dt;p.inv=.12;
+  }
+ });
+
+ p.energy=Math.min(100,p.energy+13*dt);
+ if(flowers.every(f=>f.on)){
+  document.getElementById("goal").textContent="Every memory flower is awake. Reach the star gate.";
+  const gx=W-80,gy=H-410;
+  if(Math.hypot(p.x+p.w/2-gx,p.y+p.h/2-gy)<75){
+   won=true;score+=1600;show(true);
+  }
+ }
+
+ if(p.hp<=0||p.y>H+100){gameOver=true;show(false)}
+
+ particles.forEach(a=>{
+  a.x+=a.vx*dt;a.y+=a.vy*dt;a.life-=dt;
+  a.vx*=Math.pow(.15,dt);a.vy*=Math.pow(.15,dt);
+ });
+ particles=particles.filter(a=>a.life>0);
+ updateUI();
+}
+
+function updateUI(){
+ document.getElementById("flowers").textContent=flowers.filter(f=>f.on).length+"/8";
+ document.getElementById("motes").textContent=moteCount;
+ document.getElementById("score").textContent=score;
+ document.getElementById("hp").style.width=Math.max(0,p.hp)+"%";
+ document.getElementById("energy").style.width=Math.max(0,p.energy)+"%";
+}
+
+function show(success){
+ document.getElementById("resultTitle").textContent=success?"LUMINA AWAKENS":"SPIRIT LOST";
+ document.getElementById("resultText").textContent=success
+ ?"The eight memories are reunited and the star gate opens above the forest. Final score: "+score+"."
+ :"The spirit fell before the memories could be restored. Final score: "+score+".";
+ document.getElementById("overlay").style.display="flex";
+}
+
+function draw(){
+ ctx.clearRect(0,0,W,H);
+
+ let bg=ctx.createLinearGradient(0,0,0,H);
+ bg.addColorStop(0,"#082b3a");bg.addColorStop(.48,"#061b2a");bg.addColorStop(1,"#02070d");
+ ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+
+ // moon and aurora
+ ctx.shadowBlur=35;ctx.shadowColor="#aef8ff";
+ ctx.fillStyle="#dffcff";ctx.beginPath();ctx.arc(W*.78,H*.16,38,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
+ for(let i=0;i<5;i++){
+  ctx.strokeStyle="rgba(100,235,255,.08)";
+  ctx.lineWidth=25;
+  ctx.beginPath();
+  ctx.moveTo(-50,H*.18+i*70);
+  ctx.bezierCurveTo(W*.3,H*.05+i*80,W*.7,H*.35+i*55,W+50,H*.14+i*70);
+  ctx.stroke();
+ }
+
+ // distant trees
+ for(let i=0;i<20;i++){
+  const x=i*115;
+  ctx.strokeStyle="rgba(70,170,190,.14)";
+  ctx.lineWidth=5;
+  ctx.beginPath();ctx.moveTo(x,H);ctx.lineTo(x+((i%2)?25:-20),H*.35);ctx.stroke();
+ }
+
+ // platforms
+ platforms.forEach(q=>{
+  ctx.fillStyle="#07151e";ctx.fillRect(q.x,q.y,q.w,q.h);
+  ctx.strokeStyle="#71ddeb";ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(q.x,q.y);ctx.lineTo(q.x+q.w,q.y);ctx.stroke();
+  ctx.strokeStyle="rgba(120,230,245,.09)";
+  ctx.beginPath();ctx.moveTo(q.x,q.y+q.h);ctx.lineTo(q.x+q.w,q.y+q.h);ctx.stroke();
+ });
+
+ // thorns
+ thorns.forEach(t=>{
+  ctx.fillStyle="#24404a";
+  for(let x=t.x;x<t.x+t.w;x+=16){
+   ctx.beginPath();ctx.moveTo(x,t.y+10);ctx.lineTo(x+8,t.y-5);ctx.lineTo(x+16,t.y+10);ctx.closePath();ctx.fill();
+  }
+ });
+
+ // star gate
+ const ready=flowers.every(f=>f.on);
+ const gx=W-80,gy=H-410;
+ ctx.shadowBlur=ready?30:8;ctx.shadowColor="#b8fbff";
+ ctx.strokeStyle=ready?"#eaffff":"#42636b";ctx.lineWidth=4;
+ ctx.beginPath();ctx.arc(gx,gy,34+Math.sin(performance.now()/250)*3,0,Math.PI*2);ctx.stroke();
+ ctx.shadowBlur=0;
+ ctx.fillStyle="#a9e9ef";ctx.font="10px Arial";ctx.textAlign="center";
+ ctx.fillText(ready?"STAR GATE":"SEALED",gx,gy+55);ctx.textAlign="left";
+
+ // flowers
+ flowers.forEach((f,i)=>{
+  if(f.on)return;
+  const pulse=2+Math.sin(performance.now()/220+i)*3;
+  ctx.save();ctx.translate(f.x,f.y);
+  ctx.shadowBlur=20;ctx.shadowColor="#7ff4ff";
+  ctx.strokeStyle="#e2ffff";ctx.lineWidth=2;
+  for(let k=0;k<5;k++){
+   ctx.rotate(Math.PI*2/5);
+   ctx.beginPath();ctx.ellipse(0,-13-pulse,6,14,0,0,Math.PI*2);ctx.stroke();
+  }
+  ctx.fillStyle="#eaffff";ctx.beginPath();ctx.arc(0,0,5,0,Math.PI*2);ctx.fill();
+  ctx.restore();ctx.shadowBlur=0;
+ });
+
+ // motes
+ motes.forEach(m=>{
+  if(!m.on)return;
+  ctx.shadowBlur=16;ctx.shadowColor="#8ff7ff";
+  ctx.fillStyle="#eaffff";ctx.beginPath();ctx.arc(m.x,m.y,7+Math.sin(performance.now()/180)*2,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+ });
+
+ // particles
+ particles.forEach(a=>{
+  ctx.globalAlpha=Math.max(0,a.life);
+  ctx.fillStyle="#bdfaff";ctx.fillRect(a.x,a.y,3,3);
+ });
+ ctx.globalAlpha=1;
+
+ // player
+ const gliding=!p.ground&&(keys.w||keys.arrowup||keys[" "]);
+ ctx.save();ctx.translate(p.x+p.w/2,p.y+p.h/2);
+ ctx.globalAlpha=p.inv?.45:1;
+ ctx.shadowBlur=28;ctx.shadowColor="#b8fbff";
+ ctx.fillStyle="#f2ffff";
+ ctx.beginPath();ctx.ellipse(0,-2,14,18,0,0,Math.PI*2);ctx.fill();
+ ctx.shadowBlur=0;
+ ctx.fillStyle="#06202b";ctx.beginPath();ctx.ellipse(0,1,8,9,0,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(-3,0,2,0,Math.PI*2);ctx.arc(3,0,2,0,Math.PI*2);ctx.fill();
+ if(gliding){
+  ctx.strokeStyle="#d8ffff";ctx.lineWidth=2;
+  ctx.beginPath();ctx.ellipse(-20,3,20,8,-.3,0,Math.PI*2);ctx.ellipse(20,3,20,8,.3,0,Math.PI*2);ctx.stroke();
+ }
+ ctx.restore();ctx.globalAlpha=1;
+}
+
+function loop(t){
+ const dt=Math.min(.033,(t-last)/1000);last=t;
+ update(dt);draw();requestAnimationFrame(loop);
+}
+
+function exitGame(){
+ if(history.length>1)history.back();else location.href="/";
+}
+document.getElementById("exit").onclick=exitGame;
+document.getElementById("back").onclick=exitGame;
+document.getElementById("restart").onclick=reset;
+
+reset();last=performance.now();requestAnimationFrame(loop);
+</script>
+</body>
+</html>

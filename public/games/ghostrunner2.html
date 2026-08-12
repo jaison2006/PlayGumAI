@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>PlayGumAI — Ghostrunner 2 Demo</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#030407;color:#fff;font-family:Inter,Segoe UI,Arial,sans-serif}
+body{user-select:none}
+canvas{display:block;width:100vw;height:100vh}
+#hud{position:fixed;inset:0;pointer-events:none}
+.panel{background:rgba(5,7,10,.84);border:1px solid rgba(220,230,240,.22);box-shadow:0 16px 50px #0009,inset 0 1px #fff1;backdrop-filter:blur(10px)}
+#mission{position:absolute;left:18px;top:18px;padding:14px 17px;border-radius:12px;min-width:265px}
+.kicker{font-size:10px;letter-spacing:3px;color:#aeb8c2}
+#missionTitle{font-size:19px;font-weight:900;letter-spacing:.5px;margin-top:5px}
+#objective{font-size:13px;color:#c0c7cd;margin-top:5px}
+#stats{font-size:11px;color:#8f9aa4;margin-top:9px}
+#exit{position:absolute;right:18px;top:18px;pointer-events:auto;cursor:pointer;border:1px solid #fff;background:linear-gradient(#fff,#aeb6bc);color:#050607;border-radius:9px;padding:10px 18px;font-weight:900;box-shadow:0 5px 20px #000b}
+#exit:hover{filter:brightness(1.1);transform:translateY(-1px)}
+#energy{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);width:330px;padding:10px 13px;border-radius:11px;text-align:center}
+#energyLabel{font-size:10px;letter-spacing:2px;color:#aeb8c2;margin-bottom:6px}
+#bar{height:7px;background:#171b1f;border-radius:10px;overflow:hidden}
+#fill{height:100%;width:100%;background:linear-gradient(90deg,#fff,#9ba7b0)}
+#help{position:absolute;left:50%;bottom:67px;transform:translateX(-50%);padding:8px 13px;border-radius:9px;color:#aeb7bf;font-size:11px;white-space:nowrap}
+#message{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#000b;pointer-events:auto}
+#modal{width:min(520px,calc(100vw - 34px));padding:34px;border-radius:18px;text-align:center}
+#modal h1{font-size:35px;margin:0 0 10px;letter-spacing:2px}
+#modal p{color:#aeb8c1;line-height:1.55;margin:0}
+.btns{display:flex;justify-content:center;gap:9px;margin-top:20px;flex-wrap:wrap}
+.btn{padding:11px 18px;border-radius:9px;border:1px solid #777;background:#111;color:#fff;font-weight:800;cursor:pointer}
+.btn.primary{background:linear-gradient(#fff,#adb6bd);color:#050607;border-color:#fff}
+@media(max-width:650px){
+ #mission{left:10px;top:10px;min-width:0;width:calc(100% - 20px)}
+ #exit{top:105px;right:10px}
+ #help{max-width:92vw;white-space:normal;text-align:center;bottom:70px}
+ #energy{width:min(330px,82vw)}
+}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div id="mission" class="panel">
+    <div class="kicker">PLAYGUMAI // GHOST RUN</div>
+    <div id="missionTitle">SECTOR ZERO</div>
+    <div id="objective">Reach the extraction gate.</div>
+    <div id="stats">Enemies: <span id="enemyCount">0</span> · Nodes: <span id="nodeCount">0/4</span> · Score: <span id="score">0</span></div>
+  </div>
+
+  <button id="exit">EXIT GAME</button>
+
+  <div id="help" class="panel">
+    WASD / ARROWS: MOVE · MOUSE: AIM · CLICK: DASH STRIKE · SPACE: DASH
+  </div>
+
+  <div id="energy" class="panel">
+    <div id="energyLabel">SWORD DRIVE</div>
+    <div id="bar"><div id="fill"></div></div>
+  </div>
+
+  <div id="message">
+    <div id="modal" class="panel">
+      <h1 id="msgTitle">SECTOR CLEARED</h1>
+      <p id="msgText"></p>
+      <div class="btns">
+        <button class="btn" id="again">RESTART</button>
+        <button class="btn primary" id="msgExit">EXIT GAME</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+let W=innerWidth,H=innerHeight,dpr=1;
+function resize(){
+ W=innerWidth;H=innerHeight;dpr=Math.min(devicePixelRatio||1,2);
+ canvas.width=W*dpr;canvas.height=H*dpr;
+ canvas.style.width=W+"px";canvas.style.height=H+"px";
+ ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+addEventListener("resize",resize);resize();
+
+const keys={};
+addEventListener("keydown",e=>{
+ keys[e.key.toLowerCase()]=true;
+ if(["arrowup","arrowdown","arrowleft","arrowright"," "].includes(e.key.toLowerCase()))e.preventDefault();
+ if(e.key.toLowerCase()==="escape")exitGame();
+});
+addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+
+const mouse={x:W/2,y:H/2,down:false};
+addEventListener("mousemove",e=>{mouse.x=e.clientX;mouse.y=e.clientY});
+addEventListener("mousedown",()=>mouse.down=true);
+addEventListener("mouseup",()=>mouse.down=false);
+
+let player,enemies,nodes,particles,slashes,score,gameOver,won,last,attackTimer,dashTimer;
+
+function reset(){
+ player={x:W/2,y:H*.72,r:15,speed:270,energy:100,angle:0,dash:0,inv:0};
+ enemies=[];nodes=[];particles=[];slashes=[];
+ score=0;gameOver=false;won=false;attackTimer=0;dashTimer=0;
+ for(let i=0;i<7;i++)spawnEnemy(i);
+ for(let i=0;i<4;i++)spawnNode(i);
+ document.getElementById("message").style.display="none";
+ updateHUD();
+}
+
+function spawnEnemy(i){
+ const side=i%4;
+ let x,y;
+ if(side===0){x=60;y=140+Math.random()*(H-220)}
+ if(side===1){x=W-60;y=140+Math.random()*(H-220)}
+ if(side===2){x=100+Math.random()*(W-200);y=130}
+ if(side===3){x=100+Math.random()*(W-200);y=H-130}
+ enemies.push({x,y,r:16,speed:55+Math.random()*35,hp:1,hit:0,alive:true});
+}
+
+function spawnNode(i){
+ nodes.push({
+  x:W*(.18+i*.21),
+  y:H*(.28+(i%2)*.22),
+  r:12,
+  taken:false,
+  phase:i*.8
+ });
+}
+
+function burst(x,y,n=12){
+ for(let i=0;i<n;i++){
+  const a=Math.random()*Math.PI*2,s=40+Math.random()*180;
+  particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.35+Math.random()*.55});
+ }
+}
+
+function slash(){
+ const now=performance.now();
+ if(now-attackTimer<250 || player.energy<8 || gameOver || won)return;
+ attackTimer=now;
+ player.energy-=8;
+ slashes.push({x:player.x,y:player.y,a:player.angle,life:.18});
+ burst(player.x+Math.cos(player.angle)*25,player.y+Math.sin(player.angle)*25,6);
+
+ enemies.forEach(e=>{
+  if(!e.alive)return;
+  const dx=e.x-player.x,dy=e.y-player.y,d=Math.hypot(dx,dy);
+  const a=Math.atan2(dy,dx);
+  let diff=Math.atan2(Math.sin(a-player.angle),Math.cos(a-player.angle));
+  if(d<105 && Math.abs(diff)<.72){
+   e.alive=false;
+   score+=100;
+   burst(e.x,e.y,20);
+  }
+ });
+}
+
+function dash(){
+ const now=performance.now();
+ if(now-dashTimer<700 || player.energy<15 || gameOver || won)return;
+ dashTimer=now;
+ player.energy-=15;
+ player.dash=.18;
+ player.inv=.25;
+ const dx=Math.cos(player.angle),dy=Math.sin(player.angle);
+ player.x+=dx*130;player.y+=dy*130;
+ player.x=Math.max(25,Math.min(W-25,player.x));
+ player.y=Math.max(90,Math.min(H-25,player.y));
+ burst(player.x-dx*50,player.y-dy*50,15);
+}
+
+function update(dt){
+ if(gameOver||won)return;
+
+ let ax=0,ay=0;
+ if(keys.w||keys.arrowup)ay--;
+ if(keys.s||keys.arrowdown)ay++;
+ if(keys.a||keys.arrowleft)ax--;
+ if(keys.d||keys.arrowright)ax++;
+ const len=Math.hypot(ax,ay)||1;
+ ax/=len;ay/=len;
+ player.x+=ax*player.speed*dt;
+ player.y+=ay*player.speed*dt;
+ player.x=Math.max(25,Math.min(W-25,player.x));
+ player.y=Math.max(90,Math.min(H-25,player.y));
+ player.angle=Math.atan2(mouse.y-player.y,mouse.x-player.x);
+
+ if(mouse.down){slash();mouse.down=false}
+ if(keys[" "]){
+  dash();
+  keys[" "]=false;
+ }
+
+ player.inv=Math.max(0,player.inv-dt);
+ player.energy=Math.min(100,player.energy+10*dt);
+
+ enemies.forEach(e=>{
+  if(!e.alive)return;
+  const dx=player.x-e.x,dy=player.y-e.y,d=Math.hypot(dx,dy)||1;
+  e.x+=dx/d*e.speed*dt;e.y+=dy/d*e.speed*dt;
+  if(d<e.r+player.r && player.inv<=0){
+   player.energy-=28*dt;
+   burst(player.x,player.y,2);
+  }
+ });
+
+ nodes.forEach(n=>{
+  n.phase+=dt;
+  if(!n.taken && Math.hypot(player.x-n.x,player.y-n.y)<32){
+   n.taken=true;
+   score+=150;
+   player.energy=Math.min(100,player.energy+22);
+   burst(n.x,n.y,24);
+  }
+ });
+
+ particles.forEach(p=>{
+  p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;
+ });
+ particles=particles.filter(p=>p.life>0);
+ slashes.forEach(s=>s.life-=dt);
+ slashes=slashes.filter(s=>s.life>0);
+
+ enemies=enemies.filter(e=>e.alive);
+
+ if(enemies.length===0 && nodes.every(n=>n.taken)){
+  won=true;
+  document.getElementById("objective").textContent="Extraction gate unlocked.";
+  setTimeout(showWin,450);
+ }else if(player.energy<=0){
+  gameOver=true;
+  setTimeout(showLose,300);
+ }
+ updateHUD();
+}
+
+function updateHUD(){
+ document.getElementById("enemyCount").textContent=enemies.length;
+ const got=nodes.filter(n=>n.taken).length;
+ document.getElementById("nodeCount").textContent=got+"/4";
+ document.getElementById("score").textContent=score;
+ document.getElementById("fill").style.width=Math.max(0,player.energy)+"%";
+ if(got===4 && enemies.length>0)
+  document.getElementById("objective").textContent="Nodes secured. Eliminate the remaining drones.";
+ else
+  document.getElementById("objective").textContent="Collect 4 nodes and eliminate every drone.";
+}
+
+function showWin(){
+ document.getElementById("msgTitle").textContent="SECTOR CLEARED";
+ document.getElementById("msgText").textContent=
+  "The extraction route is open. Score: "+score+". The sector is yours.";
+ document.getElementById("message").style.display="flex";
+}
+
+function showLose(){
+ document.getElementById("msgTitle").textContent="SYSTEM FAILURE";
+ document.getElementById("msgText").textContent=
+  "Your sword drive reached zero. Score: "+score+". Restart and clear the sector.";
+ document.getElementById("message").style.display="flex";
+}
+
+function draw(){
+ ctx.clearRect(0,0,W,H);
+
+ const g=ctx.createRadialGradient(W*.5,H*.45,30,W*.5,H*.45,Math.max(W,H));
+ g.addColorStop(0,"#14171b");g.addColorStop(.6,"#07090c");g.addColorStop(1,"#010203");
+ ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+
+ // cyberpunk grid
+ ctx.strokeStyle="rgba(210,220,230,.055)";
+ ctx.lineWidth=1;
+ for(let x=0;x<W;x+=55){ctx.beginPath();ctx.moveTo(x,90);ctx.lineTo(x,H);ctx.stroke()}
+ for(let y=100;y<H;y+=55){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
+
+ // skyline blocks
+ for(let i=0;i<14;i++){
+  const x=(i*137)%W,bh=80+(i%5)*35;
+  ctx.fillStyle="rgba(20,24,29,.9)";
+  ctx.fillRect(x,H-bh,100,bh);
+  ctx.strokeStyle="rgba(220,230,240,.09)";
+  ctx.strokeRect(x,H-bh,100,bh);
+ }
+
+ // extraction gate
+ const gx=W*.5,gy=115;
+ ctx.strokeStyle="#e7edf1";ctx.lineWidth=2;
+ ctx.strokeRect(gx-100,gy-35,200,70);
+ ctx.fillStyle="rgba(230,238,242,.04)";
+ ctx.fillRect(gx-100,gy-35,200,70);
+ ctx.font="10px Arial";ctx.fillStyle="#aeb8c2";ctx.textAlign="center";
+ ctx.fillText("EXTRACTION",gx,gy+4);
+ ctx.textAlign="left";
+
+ // nodes
+ nodes.forEach(n=>{
+  if(n.taken)return;
+  const pulse=2+Math.sin(n.phase*4)*2;
+  ctx.strokeStyle="#fff";ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(n.x,n.y,n.r+pulse,0,Math.PI*2);ctx.stroke();
+  ctx.fillStyle="#dfe5e9";
+  ctx.beginPath();ctx.arc(n.x,n.y,5,0,Math.PI*2);ctx.fill();
+ });
+
+ // enemies
+ enemies.forEach(e=>{
+  ctx.save();ctx.translate(e.x,e.y);
+  ctx.rotate(Math.atan2(player.y-e.y,player.x-e.x));
+  ctx.fillStyle="#181c20";ctx.strokeStyle="#d8e0e5";ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(20,0);ctx.lineTo(-13,-12);ctx.lineTo(-8,0);ctx.lineTo(-13,12);ctx.closePath();
+  ctx.fill();ctx.stroke();
+  ctx.fillStyle="#fff";ctx.fillRect(1,-3,8,6);
+  ctx.restore();
+ });
+
+ // particles
+ particles.forEach(p=>{
+  ctx.globalAlpha=Math.max(0,p.life);
+  ctx.fillStyle="#fff";ctx.fillRect(p.x,p.y,3,3);
+ });
+ ctx.globalAlpha=1;
+
+ // slash arcs
+ slashes.forEach(s=>{
+  ctx.save();ctx.translate(s.x,s.y);ctx.rotate(s.a);
+  ctx.globalAlpha=Math.max(0,s.life/.18);
+  ctx.strokeStyle="#fff";ctx.lineWidth=5;ctx.shadowBlur=18;ctx.shadowColor="#fff";
+  ctx.beginPath();ctx.arc(0,0,72,-.75,.75);ctx.stroke();
+  ctx.restore();
+ });
+ ctx.globalAlpha=1;
+
+ // player
+ ctx.save();ctx.translate(player.x,player.y);ctx.rotate(player.angle);
+ ctx.shadowBlur=25;ctx.shadowColor="#fff";
+ ctx.fillStyle="#f1f4f6";
+ ctx.beginPath();ctx.moveTo(24,0);ctx.lineTo(-13,-11);ctx.lineTo(-7,0);ctx.lineTo(-13,11);ctx.closePath();ctx.fill();
+ ctx.shadowBlur=0;
+ ctx.fillStyle="#11161a";ctx.fillRect(-5,-6,12,12);
+ // blade
+ ctx.strokeStyle="#fff";ctx.lineWidth=3;
+ ctx.beginPath();ctx.moveTo(7,0);ctx.lineTo(55,0);ctx.stroke();
+ ctx.restore();
+
+ // crosshair
+ ctx.strokeStyle="rgba(255,255,255,.75)";ctx.lineWidth=1;
+ ctx.beginPath();ctx.arc(mouse.x,mouse.y,9,0,Math.PI*2);ctx.stroke();
+ ctx.beginPath();ctx.moveTo(mouse.x-14,mouse.y);ctx.lineTo(mouse.x-5,mouse.y);
+ ctx.moveTo(mouse.x+5,mouse.y);ctx.lineTo(mouse.x+14,mouse.y);
+ ctx.stroke();
+}
+
+function loop(t){
+ const dt=Math.min(.033,(t-last)/1000);last=t;
+ update(dt);draw();requestAnimationFrame(loop);
+}
+
+function exitGame(){
+ if(history.length>1) history.back();
+ else location.href="/";
+}
+
+document.getElementById("exit").onclick=exitGame;
+document.getElementById("msgExit").onclick=exitGame;
+document.getElementById("again").onclick=reset;
+
+reset();
+last=performance.now();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

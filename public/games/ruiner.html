@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PlayGumAI — RUINER: Signal Heist</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#020202;color:#eee;font-family:Inter,Segoe UI,Arial,sans-serif}
+canvas{display:block;width:100vw;height:100vh}
+#hud{position:fixed;inset:0;pointer-events:none}
+.panel{background:rgba(5,5,6,.9);border:1px solid rgba(255,255,255,.18);box-shadow:0 16px 55px #000b,inset 0 1px #fff1;backdrop-filter:blur(10px)}
+#info{position:absolute;left:18px;top:18px;padding:15px 17px;border-radius:13px;min-width:300px}
+.kicker{font-size:10px;letter-spacing:3px;color:#999}
+h2{margin:5px 0 4px;font-size:21px;letter-spacing:1px}
+#objective{font-size:13px;color:#bbb;line-height:1.45}
+#stats{font-size:11px;color:#888;margin-top:9px}
+#exit{position:absolute;right:18px;top:18px;pointer-events:auto;border:1px solid #fff;background:linear-gradient(#fff,#aaa);color:#050505;padding:10px 18px;border-radius:9px;font-weight:900;cursor:pointer}
+#exit:hover{filter:brightness(1.1);transform:translateY(-1px)}
+#power{position:absolute;left:18px;bottom:18px;width:220px;padding:11px 13px;border-radius:10px}
+.label{font-size:10px;letter-spacing:2px;color:#999;margin-bottom:6px}
+.bar{height:7px;background:#181818;border-radius:8px;overflow:hidden}
+.fill{height:100%;width:100%;background:#eee}
+#help{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);padding:9px 14px;border-radius:9px;color:#888;font-size:11px;white-space:nowrap}
+#message{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#000d;pointer-events:auto}
+#modal{width:min(520px,calc(100% - 34px));padding:36px;border-radius:18px;text-align:center}
+#modal h1{margin:0 0 10px;font-size:36px;letter-spacing:3px}
+#modal p{margin:0;color:#aaa;line-height:1.55}
+button.modalBtn{margin-top:20px;padding:11px 19px;border-radius:9px;font-weight:800;cursor:pointer}
+#restart{background:#111;color:#fff;border:1px solid #666}
+#modalExit{background:linear-gradient(#fff,#aaa);color:#050505;border:1px solid #fff;margin-left:8px}
+@media(max-width:650px){
+#info{left:10px;top:10px;width:calc(100% - 20px);min-width:0}
+#exit{top:108px;right:10px}
+#help{bottom:76px;max-width:92vw;white-space:normal;text-align:center}
+#power{bottom:14px;width:190px}
+}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+<div id="info" class="panel">
+  <div class="kicker">PLAYGUMAI // RUINER PROTOCOL</div>
+  <h2>SIGNAL HEIST</h2>
+  <div id="objective">Hack the marked terminals in sequence and reach the vault.</div>
+  <div id="stats">Terminals: <span id="terminals">0/5</span> · Alert: <span id="alert">0%</span> · Score: <span id="score">0</span></div>
+</div>
+
+<button id="exit">EXIT GAME</button>
+
+<div id="power" class="panel">
+  <div class="label">EMP CHARGE</div>
+  <div class="bar"><div id="empFill" class="fill"></div></div>
+</div>
+
+<div id="help" class="panel">
+  WASD / ARROWS: MOVE · E: HACK · SPACE: EMP · Avoid scanner cones
+</div>
+
+<div id="message">
+  <div id="modal" class="panel">
+    <h1 id="msgTitle">VAULT BREACHED</h1>
+    <p id="msgText"></p>
+    <button id="restart" class="modalBtn">RESTART</button>
+    <button id="modalExit" class="modalBtn">EXIT GAME</button>
+  </div>
+</div>
+</div>
+
+<script>
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+let W=innerWidth,H=innerHeight;
+function resize(){W=innerWidth;H=innerHeight;canvas.width=W;canvas.height=H}
+addEventListener("resize",resize);resize();
+
+const keys={};
+addEventListener("keydown",e=>{
+  keys[e.key.toLowerCase()]=true;
+  if(["arrowup","arrowdown","arrowleft","arrowright"," "].includes(e.key.toLowerCase()))e.preventDefault();
+  if(e.key.toLowerCase()==="escape")exitGame();
+});
+addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+
+let player,terminals,guards,particles,alertLevel,emp,score,win,lose,scanTime,last;
+
+function reset(){
+  player={x:W*.5,y:H*.78,r:14,speed:190};
+  terminals=[];
+  guards=[];
+  particles=[];
+  alertLevel=0;emp=100;score=0;win=false;lose=false;
+  for(let i=0;i<5;i++) terminals.push({
+    x:W*(.18+i*.16),
+    y:H*(.28+(i%2)*.22),
+    r:22,
+    hacked:false,
+    pulse:i
+  });
+  guards=[
+    {x:W*.25,y:H*.48,r:16,a:0,speed:0.65,range:260},
+    {x:W*.72,y:H*.36,r:16,a:Math.PI,speed:-0.48,range:280},
+    {x:W*.55,y:H*.65,r:16,a:1.2,speed:.55,range:240}
+  ];
+  scanTime=0;
+  document.getElementById("message").style.display="none";
+  updateHUD();
+}
+
+function burst(x,y,n=10){
+  for(let i=0;i<n;i++){
+    const a=Math.random()*Math.PI*2,s=30+Math.random()*120;
+    particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.35+Math.random()*.6});
+  }
+}
+
+function distance(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+
+function nextTerminal(){
+  return terminals.find(t=>!t.hacked);
+}
+
+function hack(){
+  if(win||lose)return;
+  const t=nextTerminal();
+  if(!t)return;
+  if(distance(player,t)<55){
+    t.hacked=true;
+    score+=250;
+    alertLevel=Math.max(0,alertLevel-12);
+    emp=Math.min(100,emp+12);
+    burst(t.x,t.y,28);
+    if(terminals.every(x=>x.hacked)){
+      document.getElementById("objective").textContent="All systems hacked. Reach the vault gate.";
+    }
+  }
+}
+
+function empPulse(){
+  if(emp<35||win||lose)return;
+  emp-=35;
+  alertLevel=Math.max(0,alertLevel-35);
+  burst(player.x,player.y,35);
+  guards.forEach(g=>{
+    if(distance(player,g)<190)g.stun=.9;
+  });
+}
+
+function inCone(g){
+  const dx=player.x-g.x,dy=player.y-g.y,d=Math.hypot(dx,dy);
+  if(d>g.range)return false;
+  const target=Math.atan2(dy,dx);
+  let diff=Math.atan2(Math.sin(target-g.a),Math.cos(target-g.a));
+  return Math.abs(diff)<0.48;
+}
+
+function update(dt){
+  if(win||lose)return;
+
+  let x=0,y=0;
+  if(keys.w||keys.arrowup)y--;
+  if(keys.s||keys.arrowdown)y++;
+  if(keys.a||keys.arrowleft)x--;
+  if(keys.d||keys.arrowright)x++;
+  const l=Math.hypot(x,y)||1;
+  player.x+=x/l*player.speed*dt;
+  player.y+=y/l*player.speed*dt;
+  player.x=Math.max(30,Math.min(W-30,player.x));
+  player.y=Math.max(100,Math.min(H-30,player.y));
+
+  if(keys.e){hack();keys.e=false}
+  if(keys[" "]){empPulse();keys[" "]=false}
+
+  guards.forEach(g=>{
+    g.a+=g.speed*dt;
+    g.stun=Math.max(0,(g.stun||0)-dt);
+    if(inCone(g)&&!g.stun){
+      alertLevel+=32*dt;
+      burst(player.x,player.y,1);
+    }
+  });
+
+  alertLevel=Math.max(0,alertLevel-3.5*dt);
+  emp=Math.min(100,emp+5*dt);
+
+  if(alertLevel>=100){
+    lose=true;
+    showResult(false);
+    return;
+  }
+
+  if(terminals.every(t=>t.hacked)){
+    const vault={x:W*.5,y:H*.9};
+    if(Math.hypot(player.x-vault.x,player.y-vault.y)<65){
+      win=true;
+      score+=1000;
+      showResult(true);
+    }
+  }
+
+  particles.forEach(p=>{p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt});
+  particles=particles.filter(p=>p.life>0);
+  updateHUD();
+}
+
+function updateHUD(){
+  const n=terminals.filter(t=>t.hacked).length;
+  document.getElementById("terminals").textContent=n+"/5";
+  document.getElementById("alert").textContent=Math.round(alertLevel)+"%";
+  document.getElementById("score").textContent=score;
+  document.getElementById("empFill").style.width=emp+"%";
+}
+
+function showResult(success){
+  document.getElementById("msgTitle").textContent=success?"VAULT BREACHED":"SYSTEM LOCKDOWN";
+  document.getElementById("msgText").textContent=success
+    ?"Five terminals compromised. The black circuit is yours. Score: "+score+"."
+    :"Security detected you. The sector has been sealed. Score: "+score+".";
+  document.getElementById("message").style.display="flex";
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+
+  const g=ctx.createRadialGradient(W*.5,H*.48,20,W*.5,H*.48,Math.max(W,H));
+  g.addColorStop(0,"#171717");g.addColorStop(.55,"#080808");g.addColorStop(1,"#010101");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+
+  // tactical grid
+  ctx.strokeStyle="rgba(255,255,255,.045)";
+  for(let x=0;x<W;x+=50){ctx.beginPath();ctx.moveTo(x,95);ctx.lineTo(x,H);ctx.stroke()}
+  for(let y=100;y<H;y+=50){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
+
+  // buildings / walls
+  const walls=[
+    [W*.08,H*.18,W*.23,H*.12],
+    [W*.69,H*.16,W*.22,H*.13],
+    [W*.34,H*.48,W*.28,H*.11],
+    [W*.08,H*.68,W*.18,H*.13],
+    [W*.72,H*.67,W*.18,H*.13]
+  ];
+  walls.forEach(r=>{
+    ctx.fillStyle="#111";
+    ctx.fillRect(...r);
+    ctx.strokeStyle="rgba(255,255,255,.12)";
+    ctx.strokeRect(...r);
+  });
+
+  // vault
+  const vx=W*.5,vy=H*.9;
+  ctx.strokeStyle=terminals.every(t=>t.hacked)?"#fff":"#444";
+  ctx.lineWidth=3;
+  ctx.strokeRect(vx-75,vy-25,150,50);
+  ctx.fillStyle=terminals.every(t=>t.hacked)?"rgba(255,255,255,.09)":"rgba(255,255,255,.025)";
+  ctx.fillRect(vx-75,vy-25,150,50);
+  ctx.fillStyle="#aaa";ctx.font="10px Arial";ctx.textAlign="center";
+  ctx.fillText("VAULT",vx,vy+4);ctx.textAlign="left";
+
+  // scanner cones
+  guards.forEach(gd=>{
+    ctx.save();
+    ctx.translate(gd.x,gd.y);
+    ctx.rotate(gd.a);
+    const cone=ctx.createRadialGradient(0,0,10,0,0,gd.range);
+    cone.addColorStop(0,"rgba(255,255,255,.09)");
+    cone.addColorStop(1,"rgba(255,255,255,0)");
+    ctx.fillStyle=cone;
+    ctx.beginPath();ctx.moveTo(0,0);ctx.arc(0,0,gd.range,-.48,.48);ctx.closePath();ctx.fill();
+    ctx.restore();
+  });
+
+  // terminals
+  terminals.forEach(t=>{
+    if(t.hacked){
+      ctx.fillStyle="#777";
+      ctx.fillRect(t.x-12,t.y-12,24,24);
+      ctx.strokeStyle="#eee";ctx.strokeRect(t.x-12,t.y-12,24,24);
+    }else{
+      const pulse=3+Math.sin(performance.now()/300+t.pulse)*3;
+      ctx.strokeStyle="#fff";ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(t.x,t.y,t.r+pulse,0,Math.PI*2);ctx.stroke();
+      ctx.fillStyle="#151515";ctx.fill();
+      ctx.fillStyle="#eee";ctx.fillRect(t.x-5,t.y-5,10,10);
+    }
+  });
+
+  // particles
+  particles.forEach(p=>{
+    ctx.globalAlpha=Math.max(0,p.life);
+    ctx.fillStyle="#fff";ctx.fillRect(p.x,p.y,3,3);
+  });
+  ctx.globalAlpha=1;
+
+  // guards
+  guards.forEach(gd=>{
+    ctx.save();ctx.translate(gd.x,gd.y);ctx.rotate(gd.a);
+    ctx.fillStyle=gd.stun?"#555":"#0a0a0a";
+    ctx.strokeStyle="#ddd";ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(0,0,gd.r,0,Math.PI*2);ctx.fill();ctx.stroke();
+    ctx.fillStyle="#eee";ctx.fillRect(0,-3,13,6);
+    ctx.restore();
+  });
+
+  // player
+  ctx.save();ctx.translate(player.x,player.y);
+  ctx.shadowBlur=24;ctx.shadowColor="#fff";
+  ctx.fillStyle="#eee";
+  ctx.beginPath();ctx.arc(0,0,player.r,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.fillStyle="#111";ctx.fillRect(-5,-5,10,10);
+  ctx.restore();
+
+  // objective line
+  const nt=nextTerminal();
+  if(nt){
+    ctx.setLineDash([5,8]);
+    ctx.strokeStyle="rgba(255,255,255,.18)";
+    ctx.beginPath();ctx.moveTo(player.x,player.y);ctx.lineTo(nt.x,nt.y);ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+function loop(t){
+  const dt=Math.min(.033,(t-last)/1000);last=t;
+  update(dt);draw();requestAnimationFrame(loop);
+}
+
+function exitGame(){
+  if(history.length>1)history.back();
+  else location.href="/";
+}
+
+document.getElementById("exit").onclick=exitGame;
+document.getElementById("modalExit").onclick=exitGame;
+document.getElementById("restart").onclick=reset;
+
+reset();
+last=performance.now();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

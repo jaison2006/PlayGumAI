@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>PlayGumAI — A Little to the Left: Odd One Out</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050505;color:#f3f3f3;font-family:Inter,Segoe UI,Arial,sans-serif}
+body{touch-action:none}
+canvas{display:block;width:100vw;height:100vh}
+#hud{position:fixed;inset:0;pointer-events:none}
+.panel{background:rgba(8,8,8,.88);border:1px solid rgba(255,255,255,.2);box-shadow:0 18px 55px #000b,inset 0 1px #fff1;backdrop-filter:blur(12px)}
+#info{position:absolute;left:18px;top:18px;width:min(380px,calc(100vw - 36px));padding:15px 17px;border-radius:14px}
+.eyebrow{font-size:10px;letter-spacing:2.5px;color:#999}
+#title{font-size:20px;font-weight:850;margin-top:5px}
+#objective{font-size:13px;color:#c4c4c4;margin-top:5px;line-height:1.45}
+#stats{font-size:11px;color:#888;margin-top:8px}
+#exit{position:absolute;right:18px;top:18px;pointer-events:auto;cursor:pointer;border:1px solid #fff;border-radius:10px;padding:10px 18px;font-weight:900;color:#050505;background:linear-gradient(#fff,#aaa);box-shadow:0 6px 20px #0009}
+#exit:hover{filter:brightness(1.1);transform:translateY(-1px)}
+#help{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);padding:9px 14px;border-radius:10px;color:#aaa;font-size:11px;text-align:center;white-space:nowrap}
+#hint{position:absolute;left:50%;top:112px;transform:translateX(-50%);padding:10px 15px;border-radius:10px;color:#ddd;opacity:0;transition:.2s;white-space:nowrap}
+#hint.show{opacity:1}
+#actions{position:absolute;right:18px;bottom:18px;display:flex;gap:8px;pointer-events:auto}
+.action{padding:9px 13px;border-radius:9px;border:1px solid #777;background:#111;color:#eee;font-weight:800;cursor:pointer}
+.action:hover{background:#222}
+#message{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#0009;pointer-events:auto}
+#modal{width:min(500px,calc(100vw - 36px));padding:32px;border-radius:20px;text-align:center}
+#modal h1{margin:0 0 9px;font-size:32px}
+#modal p{margin:0;color:#aaa;line-height:1.55}
+.buttons{display:flex;justify-content:center;gap:9px;flex-wrap:wrap;margin-top:20px}
+.modalBtn{padding:11px 18px;border-radius:10px;border:1px solid #777;background:#111;color:#eee;font-weight:800;cursor:pointer}
+.modalBtn.primary{background:linear-gradient(#fff,#aaa);color:#050505;border-color:#fff}
+@media(max-width:650px){
+ #info{left:12px;top:12px}
+ #exit{right:12px;top:98px}
+ #actions{left:12px;right:auto;bottom:50px}
+ #help{bottom:12px;font-size:9px;max-width:92vw;white-space:normal}
+}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div id="info" class="panel">
+    <div class="eyebrow">PLAYGUMAI // TIDY LAB</div>
+    <div id="title">The Quiet Shelf</div>
+    <div id="objective">Something is wrong. Find the object that breaks the room's hidden pattern.</div>
+    <div id="stats">Scene 1 / 5 · Solved 0</div>
+  </div>
+
+  <button id="exit">EXIT GAME</button>
+
+  <div id="hint" class="panel">Watch the spacing, direction and symmetry.</div>
+
+  <div id="actions">
+    <button class="action" id="hintBtn">HINT</button>
+    <button class="action" id="resetBtn">RESET</button>
+  </div>
+
+  <div id="help" class="panel">
+    Click the object that doesn't belong · Some puzzles use position, rotation or size · H = hint · R = reset · Esc = exit
+  </div>
+
+  <div id="message">
+    <div id="modal" class="panel">
+      <h1 id="msgTitle">PERFECTLY IMPERFECT</h1>
+      <p id="msgText"></p>
+      <div class="buttons">
+        <button class="modalBtn" id="again">PLAY AGAIN</button>
+        <button class="modalBtn primary" id="msgExit">EXIT GAME</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+let W=innerWidth,H=innerHeight,dpr=1;
+
+function resize(){
+  W=innerWidth;H=innerHeight;
+  dpr=Math.min(devicePixelRatio||1,2);
+  canvas.width=W*dpr;canvas.height=H*dpr;
+  canvas.style.width=W+"px";canvas.style.height=H+"px";
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+addEventListener("resize",resize);resize();
+
+const scenes=[
+  {
+    name:"The Quiet Shelf",
+    objective:"Four books agree. One has a secret.",
+    rule:"height",
+    objects:[
+      {x:.28,y:.42,type:"book",rot:0,s:1},
+      {x:.41,y:.42,type:"book",rot:0,s:1},
+      {x:.54,y:.42,type:"book",rot:0,s:1},
+      {x:.67,y:.42,type:"book",rot:0,s:.76}
+    ],
+    odd:3
+  },
+  {
+    name:"The Morning Table",
+    objective:"Three cups face the same way. One refuses.",
+    rule:"rotation",
+    objects:[
+      {x:.27,y:.55,type:"cup",rot:0,s:1},
+      {x:.43,y:.55,type:"cup",rot:0,s:1},
+      {x:.59,y:.55,type:"cup",rot:0,s:1},
+      {x:.75,y:.55,type:"cup",rot:.45,s:1}
+    ],
+    odd:3
+  },
+  {
+    name:"The Picture Wall",
+    objective:"Everything is level. One frame is slightly tilted.",
+    rule:"angle",
+    objects:[
+      {x:.25,y:.38,type:"frame",rot:0,s:1},
+      {x:.42,y:.38,type:"frame",rot:0,s:1},
+      {x:.59,y:.38,type:"frame",rot:-.035,s:1},
+      {x:.76,y:.38,type:"frame",rot:0,s:1}
+    ],
+    odd:2
+  },
+  {
+    name:"The Garden Corner",
+    objective:"Three plants reach upward. One is leaning away.",
+    rule:"direction",
+    objects:[
+      {x:.27,y:.55,type:"plant",rot:0,s:1},
+      {x:.45,y:.55,type:"plant",rot:0,s:1},
+      {x:.63,y:.55,type:"plant",rot:.32,s:1},
+      {x:.81,y:.55,type:"plant",rot:0,s:1}
+    ],
+    odd:2
+  },
+  {
+    name:"The Last Detail",
+    objective:"The room is almost perfect. Find the tiny mistake.",
+    rule:"spacing",
+    objects:[
+      {x:.22,y:.47,type:"clock",rot:0,s:1},
+      {x:.39,y:.47,type:"clock",rot:0,s:1},
+      {x:.57,y:.47,type:"clock",rot:0,s:1},
+      {x:.80,y:.47,type:"clock",rot:0,s:1}
+    ],
+    odd:3
+  }
+];
+
+let sceneIndex=0;
+let solved=0;
+let attempts=0;
+let particles=[];
+let flash=0;
+let wrongFlash=0;
+let hover=-1;
+let finished=false;
+
+const ui={
+ title:document.getElementById("title"),
+ objective:document.getElementById("objective"),
+ stats:document.getElementById("stats"),
+ hint:document.getElementById("hint"),
+ message:document.getElementById("message"),
+ msgTitle:document.getElementById("msgTitle"),
+ msgText:document.getElementById("msgText")
+};
+
+function scene(){return scenes[sceneIndex]}
+
+function board(){
+ return {
+   x:Math.max(30,W*.08),
+   y:Math.max(140,H*.20),
+   w:Math.min(W*.84,1080),
+   h:Math.min(H-260,580)
+ };
+}
+
+function positions(){
+ const b=board();
+ return scene().objects.map(o=>({
+   x:b.x+b.w*o.x,
+   y:b.y+b.h*o.y
+ }));
+}
+
+function updateUI(){
+ ui.title.textContent=scene().name;
+ ui.objective.textContent=scene().objective;
+ ui.stats.textContent=`Scene ${sceneIndex+1} / ${scenes.length} · Solved ${solved} · Attempts ${attempts}`;
+}
+
+function objectSize(o){
+ if(o.type==="book")return [86*o.s,54*o.s];
+ if(o.type==="cup")return [58*o.s,64*o.s];
+ if(o.type==="frame")return [82*o.s,105*o.s];
+ if(o.type==="plant")return [72*o.s,100*o.s];
+ return [65*o.s,65*o.s];
+}
+
+function hitObject(i,p){
+ const o=scene().objects[i],pos=positions()[i],s=objectSize(o);
+ return Math.hypot(p.x-pos.x,p.y-pos.y)<Math.max(s[0],s[1])*.62;
+}
+
+function pointer(e){
+ const r=canvas.getBoundingClientRect();
+ return {x:e.clientX-r.left,y:e.clientY-r.top};
+}
+
+canvas.addEventListener("pointermove",e=>{
+ const p=pointer(e);
+ hover=-1;
+ positions().forEach((pos,i)=>{
+   if(hitObject(i,p))hover=i;
+ });
+});
+
+canvas.addEventListener("pointerleave",()=>hover=-1);
+
+canvas.addEventListener("pointerdown",e=>{
+ if(finished)return;
+ const p=pointer(e);
+ let picked=-1;
+ for(let i=scene().objects.length-1;i>=0;i--){
+   if(hitObject(i,p)){picked=i;break}
+ }
+ if(picked<0)return;
+ attempts++;
+ updateUI();
+
+ if(picked===scene().odd){
+   solve(picked);
+ }else{
+   wrongFlash=1;
+   burst(p.x,p.y,8);
+   showHintMessage("Not quite. Look for the smallest difference.");
+ }
+});
+
+function solve(index){
+ solved++;
+ flash=1;
+ const pos=positions()[index];
+ burst(pos.x,pos.y,32);
+
+ if(sceneIndex<scenes.length-1){
+   setTimeout(()=>{
+     sceneIndex++;
+     loadScene();
+   },850);
+ }else{
+   finished=true;
+   setTimeout(()=>{
+     ui.msgTitle.textContent="PERFECTLY IMPERFECT";
+     ui.msgText.textContent=`You found every odd detail. ${solved} scenes solved with ${attempts} total choices.`;
+     ui.message.style.display="flex";
+   },650);
+ }
+}
+
+function loadScene(){
+ attempts=0;
+ hover=-1;
+ updateUI();
+}
+
+function resetGame(){
+ sceneIndex=0;
+ solved=0;
+ attempts=0;
+ finished=false;
+ ui.message.style.display="none";
+ loadScene();
+}
+
+function showHintMessage(text){
+ ui.hint.textContent=text;
+ ui.hint.classList.add("show");
+ clearTimeout(window.__hint);
+ window.__hint=setTimeout(()=>ui.hint.classList.remove("show"),2200);
+}
+
+function hint(){
+ if(finished)return;
+ const rule=scene().rule;
+ let text="Look carefully at the pattern.";
+ if(rule==="height")text="Hint: one object is a different size.";
+ if(rule==="rotation")text="Hint: check which object faces a different direction.";
+ if(rule==="angle")text="Hint: one frame is not perfectly level.";
+ if(rule==="direction")text="Hint: one plant leans differently from the others.";
+ if(rule==="spacing")text="Hint: compare the gaps between neighboring objects.";
+ showHintMessage(text);
+}
+
+function exitGame(){
+ window.history.back();
+}
+
+document.getElementById("exit").onclick=exitGame;
+document.getElementById("msgExit").onclick=exitGame;
+document.getElementById("again").onclick=resetGame;
+document.getElementById("resetBtn").onclick=resetGame;
+document.getElementById("hintBtn").onclick=hint;
+
+addEventListener("keydown",e=>{
+ const k=e.key.toLowerCase();
+ if(k==="escape")exitGame();
+ if(k==="r")resetGame();
+ if(k==="h")hint();
+});
+
+function drawBackground(){
+ const g=ctx.createRadialGradient(W*.5,H*.45,20,W*.5,H*.45,Math.max(W,H));
+ g.addColorStop(0,"#222");
+ g.addColorStop(.55,"#0b0b0b");
+ g.addColorStop(1,"#020202");
+ ctx.fillStyle=g;
+ ctx.fillRect(0,0,W,H);
+
+ ctx.strokeStyle="rgba(255,255,255,.03)";
+ for(let x=0;x<W;x+=70){
+   ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();
+ }
+ for(let y=0;y<H;y+=70){
+   ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();
+ }
+}
+
+function drawRoom(){
+ const b=board();
+
+ const wall=ctx.createLinearGradient(0,b.y,0,b.y+b.h);
+ wall.addColorStop(0,"#303030");
+ wall.addColorStop(1,"#131313");
+ ctx.fillStyle=wall;
+ ctx.fillRect(b.x,b.y,b.w,b.h);
+
+ // floor
+ ctx.fillStyle="#0b0b0b";
+ ctx.fillRect(b.x,b.y+b.h*.78,b.w,b.h*.22);
+
+ ctx.strokeStyle="#252525";
+ for(let x=b.x;x<b.x+b.w;x+=55){
+   ctx.beginPath();ctx.moveTo(x,b.y+b.h*.78);ctx.lineTo(x,b.y+b.h);ctx.stroke();
+ }
+
+ // shelf
+ ctx.fillStyle="#242424";
+ ctx.fillRect(b.x+b.w*.11,b.y+b.h*.22,b.w*.78,14);
+ ctx.fillRect(b.x+b.w*.11,b.y+b.h*.49,b.w*.78,14);
+
+ // window
+ ctx.fillStyle="#070707";
+ ctx.fillRect(b.x+b.w*.06,b.y+b.h*.08,b.w*.16,b.h*.27);
+ ctx.strokeStyle="#666";
+ ctx.strokeRect(b.x+b.w*.06,b.y+b.h*.08,b.w*.16,b.h*.27);
+
+ // subtle light
+ const light=ctx.createRadialGradient(
+   b.x+b.w*.5,b.y+b.h*.15,10,
+   b.x+b.w*.5,b.y+b.h*.15,b.w*.55
+ );
+ light.addColorStop(0,"rgba(255,255,255,.09)");
+ light.addColorStop(1,"rgba(255,255,255,0)");
+ ctx.fillStyle=light;
+ ctx.fillRect(b.x,b.y,b.w,b.h);
+}
+
+function drawBook(x,y,s,o){
+ ctx.save();
+ ctx.translate(x,y);ctx.rotate(o.rot);
+ ctx.shadowColor="#000b";ctx.shadowBlur=14;ctx.shadowOffsetY=8;
+ const g=ctx.createLinearGradient(0,-s[1]/2,0,s[1]/2);
+ g.addColorStop(0,"#f4f4f4");g.addColorStop(.5,"#aaa");g.addColorStop(1,"#444");
+ ctx.fillStyle=g;
+ ctx.fillRect(-s[0]/2,-s[1]/2,s[0],s[1]);
+ ctx.fillStyle="#303030";
+ ctx.fillRect(-s[0]/2+8,-s[1]/2,5,s[1]);
+ ctx.strokeStyle="#ddd";ctx.strokeRect(-s[0]/2,-s[1]/2,s[0],s[1]);
+ ctx.restore();
+}
+
+function drawCup(x,y,s,o){
+ ctx.save();ctx.translate(x,y);ctx.rotate(o.rot);
+ ctx.shadowColor="#000b";ctx.shadowBlur=14;ctx.shadowOffsetY=8;
+ const g=ctx.createLinearGradient(0,-s[1]/2,0,s[1]/2);
+ g.addColorStop(0,"#f4f4f4");g.addColorStop(.55,"#aaa");g.addColorStop(1,"#444");
+ ctx.fillStyle=g;
+ ctx.beginPath();
+ ctx.roundRect(-s[0]/2,-s[1]/2,s[0]*.72,s[1],10);
+ ctx.fill();
+ ctx.strokeStyle="#ddd";ctx.lineWidth=3;ctx.stroke();
+ ctx.beginPath();ctx.arc(s[0]*.27,0,13,-Math.PI/2,Math.PI/2);ctx.stroke();
+ ctx.restore();
+}
+
+function drawFrame(x,y,s,o){
+ ctx.save();ctx.translate(x,y);ctx.rotate(o.rot);
+ ctx.shadowColor="#000b";ctx.shadowBlur=14;ctx.shadowOffsetY=8;
+ ctx.fillStyle="#d8d8d8";
+ ctx.fillRect(-s[0]/2,-s[1]/2,s[0],s[1]);
+ ctx.fillStyle="#191919";
+ ctx.fillRect(-s[0]/2+9,-s[1]/2+9,s[0]-18,s[1]-18);
+ ctx.fillStyle="#aaa";
+ ctx.beginPath();ctx.arc(0,-7,10,0,Math.PI*2);ctx.fill();
+ ctx.fillRect(-18,9,36,5);
+ ctx.restore();
+}
+
+function drawPlant(x,y,s,o){
+ ctx.save();ctx.translate(x,y);ctx.rotate(o.rot);
+ ctx.shadowColor="#000b";ctx.shadowBlur=14;ctx.shadowOffsetY=8;
+ ctx.fillStyle="#aaa";
+ ctx.fillRect(-14,14,28,25);
+ ctx.fillStyle="#ddd";
+ for(let i=-2;i<=2;i++){
+   ctx.beginPath();
+   ctx.ellipse(i*9,-10-Math.abs(i)*3,10,22,i*.2,0,Math.PI*2);
+   ctx.fill();
+ }
+ ctx.restore();
+}
+
+function drawClock(x,y,s,o){
+ ctx.save();ctx.translate(x,y);ctx.rotate(o.rot);
+ ctx.shadowColor="#000b";ctx.shadowBlur=14;ctx.shadowOffsetY=8;
+ ctx.fillStyle="#ddd";
+ ctx.beginPath();ctx.arc(0,0,s[0]/2,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle="#222";
+ ctx.beginPath();ctx.arc(0,0,s[0]*.34,0,Math.PI*2);ctx.fill();
+ ctx.strokeStyle="#ddd";ctx.lineWidth=3;
+ ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(0,-17);ctx.moveTo(0,0);ctx.lineTo(12,7);ctx.stroke();
+ ctx.restore();
+}
+
+function drawObject(o,i){
+ const p=positions()[i];
+ const s=objectSize(o);
+
+ // target-like soft halo on hover
+ if(i===hover){
+   ctx.strokeStyle="rgba(255,255,255,.35)";
+   ctx.lineWidth=2;
+   ctx.beginPath();
+   ctx.arc(p.x,p.y,Math.max(s[0],s[1])*.58,0,Math.PI*2);
+   ctx.stroke();
+ }
+
+ if(o.type==="book")drawBook(p.x,p.y,s,o);
+ if(o.type==="cup")drawCup(p.x,p.y,s,o);
+ if(o.type==="frame")drawFrame(p.x,p.y,s,o);
+ if(o.type==="plant")drawPlant(p.x,p.y,s,o);
+ if(o.type==="clock")drawClock(p.x,p.y,s,o);
+}
+
+function burst(x,y,n){
+ for(let i=0;i<n;i++){
+  const a=Math.random()*Math.PI*2;
+  const sp=35+Math.random()*150;
+  particles.push({
+   x,y,
+   vx:Math.cos(a)*sp,
+   vy:Math.sin(a)*sp,
+   life:.35+Math.random()*.75
+  });
+ }
+}
+
+function drawParticles(dt){
+ for(let i=particles.length-1;i>=0;i--){
+  const p=particles[i];
+  p.x+=p.vx*dt;
+  p.y+=p.vy*dt;
+  p.life-=dt;
+  if(p.life<=0){particles.splice(i,1);continue}
+  ctx.globalAlpha=Math.max(0,p.life);
+  ctx.fillStyle="#fff";
+  ctx.fillRect(p.x,p.y,3,3);
+ }
+ ctx.globalAlpha=1;
+}
+
+function draw(){
+ drawBackground();
+ drawRoom();
+
+ // Soft spotlight around the puzzle
+ const b=board();
+ const spotlight=ctx.createRadialGradient(
+   b.x+b.w*.5,b.y+b.h*.48,20,
+   b.x+b.w*.5,b.y+b.h*.48,b.w*.6
+ );
+ spotlight.addColorStop(0,"rgba(255,255,255,.035)");
+ spotlight.addColorStop(1,"rgba(255,255,255,0)");
+ ctx.fillStyle=spotlight;
+ ctx.fillRect(b.x,b.y,b.w,b.h);
+
+ scene().objects.forEach(drawObject);
+}
+
+let last=performance.now();
+
+function loop(t){
+ const dt=Math.min(.033,(t-last)/1000);
+ last=t;
+ draw();
+ drawParticles(dt);
+ requestAnimationFrame(loop);
+}
+
+loadScene();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

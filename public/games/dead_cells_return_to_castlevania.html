@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PlayGumAI — Crimson Reliquary</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080508;color:#fff;font-family:Inter,Segoe UI,Arial,sans-serif}
+canvas{display:block;width:100%;height:100%}
+#hud{position:fixed;inset:0;pointer-events:none}
+.panel{background:rgba(16,7,13,.88);border:1px solid rgba(255,190,120,.24);box-shadow:0 12px 40px #000b,inset 0 1px #fff1;backdrop-filter:blur(8px)}
+#mission{position:absolute;left:18px;top:18px;padding:13px 16px;border-radius:12px;min-width:315px}
+.kicker{font-size:9px;letter-spacing:3px;color:#ffb86b}
+#name{font-size:21px;font-weight:900;margin:5px 0}
+#objective{font-size:13px;color:#d9c2c8;line-height:1.45}
+#stats{margin-top:8px;font-size:11px;color:#b38f98}
+#exit{position:absolute;right:18px;top:18px;pointer-events:auto;cursor:pointer;padding:10px 18px;border-radius:9px;border:1px solid #fff;background:linear-gradient(#fff,#d0c2bd);color:#180b0e;font-weight:900}
+#exit:hover{filter:brightness(1.1);transform:translateY(-1px)}
+#controls{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);padding:9px 14px;border-radius:9px;color:#c8adb3;font-size:11px;white-space:nowrap}
+#bars{position:absolute;right:18px;bottom:18px;width:235px;padding:11px;border-radius:10px}
+.label{font-size:9px;letter-spacing:2px;color:#b9979f}
+.bar{height:7px;background:#241016;border-radius:8px;overflow:hidden;margin:5px 0 9px}
+.fill{height:100%}
+#hp{background:linear-gradient(90deg,#ff4f5e,#ffc16f)}
+#rage{background:linear-gradient(90deg,#e44dff,#ffbd65)}
+#overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#10030acc;pointer-events:auto}
+#modal{width:min(520px,90vw);padding:34px;border-radius:17px;text-align:center}
+#modal h1{margin:0 0 10px;font-size:34px;letter-spacing:2px}
+#modal p{color:#d1bfc4;line-height:1.55}
+button.action{margin-top:13px;padding:10px 18px;border-radius:8px;font-weight:900;cursor:pointer}
+#restart{background:#190d12;color:#fff;border:1px solid #8f5c67}
+#back{margin-left:8px;background:linear-gradient(#fff,#d0c2bd);border:1px solid #fff;color:#180b0e}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+ <div id="mission" class="panel">
+  <div class="kicker">PLAYGUMAI // NIGHTFALL RUN</div>
+  <div id="name">CRIMSON RELIQUARY</div>
+  <div id="objective">Recover 5 cursed seals and reach the moon gate.</div>
+  <div id="stats">Seals: <span id="seals">0/5</span> · Shards: <span id="shards">0</span> · Score: <span id="score">0</span></div>
+ </div>
+
+ <button id="exit">EXIT GAME</button>
+
+ <div id="controls" class="panel">
+  A/D or ←/→ MOVE · W/↑/SPACE JUMP · SHIFT DASH · J ATTACK · K SHADOW BURST
+ </div>
+
+ <div id="bars" class="panel">
+  <div class="label">LIFE</div>
+  <div class="bar"><div id="hp" class="fill"></div></div>
+  <div class="label">SHADOW CHARGE</div>
+  <div class="bar"><div id="rage" class="fill"></div></div>
+ </div>
+</div>
+
+<div id="overlay">
+ <div id="modal" class="panel">
+  <h1 id="resultTitle"></h1>
+  <p id="resultText"></p>
+  <button id="restart" class="action">RESTART</button>
+  <button id="back" class="action">EXIT GAME</button>
+ </div>
+</div>
+
+<script>
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+let W=innerWidth,H=innerHeight,dpr=1;
+
+function resize(){
+ W=innerWidth;H=innerHeight;dpr=Math.min(devicePixelRatio||1,2);
+ canvas.width=W*dpr;canvas.height=H*dpr;
+ canvas.style.width=W+"px";canvas.style.height=H+"px";
+ ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+addEventListener("resize",resize);resize();
+
+const keys=Object.create(null);
+addEventListener("keydown",e=>{
+ const k=e.key.toLowerCase();
+ keys[k]=true;
+ if(["arrowleft","arrowright","arrowup","arrowdown"," "].includes(k))e.preventDefault();
+ if(k==="escape")exitGame();
+});
+addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+
+let p,platforms,seals,shards,enemies,particles,score,shardCount;
+let attackTimer=0,dashTimer=0,burstTimer=0,won=false,lost=false,last=0;
+
+function reset(){
+ p={x:80,y:H-180,w:25,h:38,vx:0,vy:0,hp:100,charge:0,ground:false,inv:0,facing:1};
+ platforms=[
+  {x:-30,y:H-45,w:W+60,h:45},
+  {x:60,y:H-155,w:230,h:15},
+  {x:360,y:H-265,w:210,h:15},
+  {x:650,y:H-175,w:220,h:15},
+  {x:930,y:H-310,w:205,h:15},
+  {x:1190,y:H-205,w:235,h:15},
+  {x:1490,y:H-335,w:230,h:15},
+  {x:1780,y:H-220,w:250,h:15},
+  {x:2070,y:H-360,w:220,h:15}
+ ];
+ seals=[
+  {x:175,y:H-195,on:false},
+  {x:465,y:H-305,on:false},
+  {x:755,y:H-215,on:false},
+  {x:1015,y:H-350,on:false},
+  {x:1595,y:H-375,on:false}
+ ];
+ shards=[
+  {x:280,y:H-220,on:true},{x:590,y:H-335,on:true},
+  {x:890,y:H-245,on:true},{x:1370,y:H-270,on:true},
+  {x:1900,y:H-285,on:true},{x:2160,y:H-400,on:true}
+ ];
+ enemies=[
+  {x:315,y:H-85,w:30,h:30,hp:3,vx:50,dead:false,hit:0},
+  {x:720,y:H-215,w:30,h:30,hp:3,vx:-45,dead:false,hit:0},
+  {x:1120,y:H-340,w:30,h:30,hp:3,vx:55,dead:false,hit:0},
+  {x:1640,y:H-365,w:30,h:30,hp:4,vx:-55,dead:false,hit:0},
+  {x:1940,y:H-250,w:30,h:30,hp:4,vx:45,dead:false,hit:0}
+ ];
+ particles=[];score=0;shardCount=0;attackTimer=0;dashTimer=0;burstTimer=0;
+ won=false;lost=false;
+ document.getElementById("overlay").style.display="none";
+ updateUI();
+}
+
+function burst(x,y,n=18,power=120){
+ for(let i=0;i<n;i++){
+  const a=Math.random()*Math.PI*2,s=25+Math.random()*power;
+  particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.3+Math.random()*.65});
+ }
+}
+
+function attack(){
+ if(attackTimer>0||lost||won)return;
+ attackTimer=.25;
+ const ax=p.x+(p.facing>0?p.w+27:-27);
+ enemies.forEach(e=>{
+  if(e.dead)return;
+  const d=Math.hypot(e.x+e.w/2-ax,e.y+e.h/2-(p.y+p.h/2));
+  if(d<75){
+   e.hp--;e.hit=.15;score+=100;p.charge=Math.min(100,p.charge+15);burst(e.x+e.w/2,e.y+e.h/2,12,90);
+   if(e.hp<=0){e.dead=true;score+=250;p.charge=Math.min(100,p.charge+25);burst(e.x+e.w/2,e.y+e.h/2,28,170)}
+  }
+ });
+}
+
+function dash(){
+ if(dashTimer>0||p.charge<20||lost||won)return;
+ dashTimer=.6;p.charge-=20;p.inv=.25;
+ p.vx=p.facing*650;p.vy=-80;
+ burst(p.x+p.w/2,p.y+p.h/2,22,150);
+}
+
+function shadowBurst(){
+ if(burstTimer>0||p.charge<60||lost||won)return;
+ burstTimer=1.2;p.charge-=60;
+ const cx=p.x+p.w/2,cy=p.y+p.h/2;
+ enemies.forEach(e=>{
+  if(!e.dead&&Math.hypot(e.x+e.w/2-cx,e.y+e.h/2-cy)<190){
+   e.hp-=4;score+=150;
+   if(e.hp<=0){e.dead=true;score+=250}
+   burst(e.x+e.w/2,e.y+e.h/2,18,120);
+  }
+ });
+ burst(cx,cy,55,230);
+}
+
+function update(dt){
+ if(lost||won)return;
+
+ attackTimer=Math.max(0,attackTimer-dt);
+ dashTimer=Math.max(0,dashTimer-dt);
+ burstTimer=Math.max(0,burstTimer-dt);
+ p.inv=Math.max(0,p.inv-dt);
+
+ let dir=0;
+ if(keys.a||keys.arrowleft)dir--;
+ if(keys.d||keys.arrowright)dir++;
+ if(dir)p.facing=dir;
+ p.vx+=dir*850*dt;
+ p.vx*=Math.pow(.0012,dt);
+ p.vx=Math.max(-280,Math.min(280,p.vx));
+
+ if((keys.w||keys.arrowup||keys[" "])&&p.ground){
+  p.vy=-540;p.ground=false;
+  keys.w=keys.arrowup=keys[" "]=false;
+ }
+ if(keys.j){attack();keys.j=false}
+ if(keys.shift){dash();keys.shift=false}
+ if(keys.k){shadowBurst();keys.k=false}
+
+ p.vy+=1350*dt;
+ p.x+=p.vx*dt;p.y+=p.vy*dt;
+ p.x=Math.max(0,Math.min(W-p.w,p.x));
+ p.ground=false;
+
+ platforms.forEach(q=>{
+  if(p.x+p.w>q.x&&p.x<q.x+q.w&&p.y+p.h>=q.y&&p.y+p.h<=q.y+26&&p.vy>=0){
+   p.y=q.y-p.h;p.vy=0;p.ground=true;
+  }
+ });
+
+ seals.forEach(s=>{
+  if(!s.on&&Math.hypot(p.x+p.w/2-s.x,p.y+p.h/2-s.y)<38){
+   s.on=true;score+=400;p.charge=Math.min(100,p.charge+20);burst(s.x,s.y,35,180);
+  }
+ });
+
+ shards.forEach(s=>{
+  if(s.on&&Math.hypot(p.x+p.w/2-s.x,p.y+p.h/2-s.y)<30){
+   s.on=false;shardCount++;score+=100;p.charge=Math.min(100,p.charge+10);burst(s.x,s.y,15,100);
+  }
+ });
+
+ enemies.forEach(e=>{
+  if(e.dead)return;
+  e.hit=Math.max(0,e.hit-dt);
+  e.x+=e.vx*dt;
+  if(e.x<30||e.x>W-60)e.vx*=-1;
+
+  const d=Math.hypot(p.x+p.w/2-(e.x+e.w/2),p.y+p.h/2-(e.y+e.h/2));
+  if(d<43&&!p.inv){
+   p.hp-=28*dt;p.inv=.15;
+   p.vx+=(p.x<e.x?-180:180)*dt;
+  }
+ });
+
+ if(seals.every(s=>s.on)){
+  document.getElementById("objective").textContent="The 5 seals are broken. Reach the Crimson Gate.";
+  const gx=W-70,gy=H-420;
+  if(Math.hypot(p.x+p.w/2-gx,p.y+p.h/2-gy)<75){
+   won=true;score+=2000;show(true);
+  }
+ }
+
+ if(p.hp<=0||p.y>H+100){lost=true;show(false)}
+ p.charge=Math.min(100,p.charge+7*dt);
+
+ particles.forEach(a=>{
+  a.x+=a.vx*dt;a.y+=a.vy*dt;a.life-=dt;
+  a.vx*=Math.pow(.12,dt);a.vy*=Math.pow(.12,dt);
+ });
+ particles=particles.filter(a=>a.life>0);
+ updateUI();
+}
+
+function updateUI(){
+ document.getElementById("seals").textContent=seals.filter(s=>s.on).length+"/5";
+ document.getElementById("shards").textContent=shardCount;
+ document.getElementById("score").textContent=score;
+ document.getElementById("hp").style.width=Math.max(0,p.hp)+"%";
+ document.getElementById("rage").style.width=Math.max(0,p.charge)+"%";
+}
+
+function show(success){
+ document.getElementById("resultTitle").textContent=success?"GATE OPEN":"NIGHTFALL";
+ document.getElementById("resultText").textContent=success
+ ?"The five cursed seals have been broken and the Crimson Gate opens. Final score: "+score+"."
+ :"Your run ended in the reliquary. Final score: "+score+".";
+ document.getElementById("overlay").style.display="flex";
+}
+
+function draw(){
+ ctx.clearRect(0,0,W,H);
+
+ const bg=ctx.createLinearGradient(0,0,0,H);
+ bg.addColorStop(0,"#180912");bg.addColorStop(.55,"#09070d");bg.addColorStop(1,"#020306");
+ ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+
+ // giant moon
+ ctx.shadowBlur=35;ctx.shadowColor="#ff806b";
+ ctx.fillStyle="#e9c3ae";ctx.beginPath();ctx.arc(W*.78,H*.16,42,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
+
+ // gothic silhouettes
+ for(let i=0;i<13;i++){
+  const x=i*115;
+  const h=100+(i%5)*45;
+  ctx.fillStyle="rgba(35,10,20,.85)";
+  ctx.fillRect(x,H-h-45,75,h);
+  ctx.beginPath();ctx.moveTo(x-10,H-h-45);ctx.lineTo(x+37,H-h-105);ctx.lineTo(x+85,H-h-45);ctx.fill();
+  ctx.fillStyle="rgba(255,120,80,.12)";
+  ctx.fillRect(x+30,H-h+5,10,18);
+ }
+
+ // red fog
+ for(let i=0;i<5;i++){
+  ctx.strokeStyle="rgba(255,65,80,.07)";
+  ctx.lineWidth=28;
+  ctx.beginPath();ctx.moveTo(-50,H*.35+i*100);
+  ctx.bezierCurveTo(W*.3,H*.2+i*110,W*.7,H*.5+i*80,W+50,H*.32+i*100);
+  ctx.stroke();
+ }
+
+ // platforms
+ platforms.forEach(q=>{
+  ctx.fillStyle="#130b12";ctx.fillRect(q.x,q.y,q.w,q.h);
+  ctx.strokeStyle="#a64d58";ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(q.x,q.y);ctx.lineTo(q.x+q.w,q.y);ctx.stroke();
+  ctx.strokeStyle="rgba(255,160,120,.10)";
+  ctx.beginPath();ctx.moveTo(q.x,q.y+q.h);ctx.lineTo(q.x+q.w,q.y+q.h);ctx.stroke();
+ });
+
+ // gate
+ const ready=seals.every(s=>s.on);
+ const gx=W-70,gy=H-420;
+ ctx.shadowBlur=ready?30:8;ctx.shadowColor="#ff9a69";
+ ctx.strokeStyle=ready?"#ffd3a7":"#6b4147";ctx.lineWidth=5;
+ ctx.beginPath();ctx.arc(gx,gy,34+Math.sin(performance.now()/220)*3,0,Math.PI*2);ctx.stroke();
+ ctx.shadowBlur=0;
+ ctx.fillStyle="#c99191";ctx.font="10px Arial";ctx.textAlign="center";
+ ctx.fillText(ready?"CRIMSON GATE":"SEALED",gx,gy+58);ctx.textAlign="left";
+
+ // seals
+ seals.forEach((s,i)=>{
+  if(s.on)return;
+  ctx.save();ctx.translate(s.x,s.y);ctx.rotate(Math.PI/4);
+  ctx.shadowBlur=20;ctx.shadowColor="#ff625f";
+  ctx.fillStyle="#4b1722";ctx.strokeStyle="#ff9b75";ctx.lineWidth=2;
+  ctx.fillRect(-12,-12,24,24);ctx.strokeRect(-12,-12,24,24);
+  ctx.restore();ctx.shadowBlur=0;
+ });
+
+ // shards
+ shards.forEach(s=>{
+  if(!s.on)return;
+  ctx.shadowBlur=18;ctx.shadowColor="#b45cff";
+  ctx.fillStyle="#f0c8ff";
+  ctx.beginPath();ctx.moveTo(s.x,s.y-10);ctx.lineTo(s.x+8,s.y);ctx.lineTo(s.x,s.y+12);ctx.lineTo(s.x-8,s.y);ctx.closePath();ctx.fill();
+  ctx.shadowBlur=0;
+ });
+
+ // enemies
+ enemies.forEach(e=>{
+  if(e.dead)return;
+  ctx.save();ctx.translate(e.x+e.w/2,e.y+e.h/2);
+  ctx.fillStyle=e.hit>0?"#ffb18e":"#27101b";
+  ctx.strokeStyle="#ff765f";ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(0,0,16,0,Math.PI*2);ctx.fill();ctx.stroke();
+  ctx.fillStyle="#fff0dd";ctx.fillRect(-7,-3,4,5);ctx.fillRect(3,-3,4,5);
+  ctx.restore();
+ });
+
+ // particles
+ particles.forEach(a=>{
+  ctx.globalAlpha=Math.max(0,a.life);
+  ctx.fillStyle="#ffb27b";ctx.fillRect(a.x,a.y,3,3);
+ });
+ ctx.globalAlpha=1;
+
+ // player
+ ctx.save();ctx.translate(p.x+p.w/2,p.y+p.h/2);
+ ctx.scale(p.facing,1);
+ ctx.globalAlpha=p.inv>0?.5:1;
+ ctx.shadowBlur=25;ctx.shadowColor="#ff795f";
+ ctx.fillStyle="#f1e3df";
+ ctx.beginPath();ctx.ellipse(0,-3,13,18,0,0,Math.PI*2);ctx.fill();
+ ctx.shadowBlur=0;
+ ctx.fillStyle="#190a10";
+ ctx.beginPath();ctx.ellipse(0,0,8,10,0,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle="#ffd1a8";ctx.fillRect(4,-2,3,3);
+ // scarf
+ ctx.strokeStyle="#ff695d";ctx.lineWidth=3;
+ ctx.beginPath();ctx.moveTo(-8,10);ctx.quadraticCurveTo(-20,20,-5,27);ctx.stroke();
+ // weapon
+ if(attackTimer>0){
+  ctx.strokeStyle="#ffe0bd";ctx.lineWidth=5;
+  ctx.beginPath();ctx.arc(10,0,38,-1.15,1.15);ctx.stroke();
+ }else{
+  ctx.strokeStyle="#d9c8c4";ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(9,3);ctx.lineTo(35,3);ctx.stroke();
+ }
+ ctx.restore();ctx.globalAlpha=1;
+}
+
+function loop(t){
+ const dt=Math.min(.033,(t-last)/1000);last=t;
+ update(dt);draw();requestAnimationFrame(loop);
+}
+
+function exitGame(){
+ if(history.length>1)history.back();else location.href="/";
+}
+document.getElementById("exit").onclick=exitGame;
+document.getElementById("back").onclick=exitGame;
+document.getElementById("restart").onclick=reset;
+
+reset();last=performance.now();requestAnimationFrame(loop);
+</script>
+</body>
+</html>

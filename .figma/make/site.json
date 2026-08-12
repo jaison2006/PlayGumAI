@@ -1,0 +1,10 @@
+{
+  "description": "This web application offers a sleek design tool for creating custom logos, featuring a shining silver aesthetic and dark black fonts for professional branding.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

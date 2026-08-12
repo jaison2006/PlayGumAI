@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PlayGumAI — Unpack</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#090909;color:#eee;font-family:Inter,Segoe UI,Arial,sans-serif}
+body{touch-action:none}
+canvas{display:block;width:100vw;height:100vh}
+#hud{position:fixed;inset:0;pointer-events:none}
+.panel{background:rgba(10,10,10,.88);border:1px solid rgba(255,255,255,.18);box-shadow:0 16px 50px #0009,inset 0 1px #fff1;backdrop-filter:blur(12px)}
+#info{position:absolute;left:18px;top:18px;width:min(350px,calc(100vw - 36px));padding:15px 17px;border-radius:14px}
+.eyebrow{font-size:10px;letter-spacing:2.5px;color:#999}
+#roomTitle{font-size:20px;font-weight:800;margin-top:5px}
+#objective{font-size:13px;color:#bbb;margin-top:5px;line-height:1.4}
+#stats{font-size:11px;color:#888;margin-top:8px}
+#exit{position:absolute;right:18px;top:18px;pointer-events:auto;cursor:pointer;border:1px solid #fff;border-radius:10px;padding:10px 18px;font-weight:900;color:#050505;background:linear-gradient(#fff,#aaa);box-shadow:0 6px 20px #0009}
+#exit:hover{filter:brightness(1.08);transform:translateY(-1px)}
+#help{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);padding:9px 14px;border-radius:10px;color:#aaa;font-size:11px;white-space:nowrap}
+#actions{position:absolute;right:18px;bottom:18px;display:flex;gap:8px;pointer-events:auto}
+.action{padding:9px 13px;border-radius:9px;border:1px solid #777;background:#111;color:#eee;font-weight:700;cursor:pointer}
+.action:hover{background:#222}
+#hint{position:absolute;left:50%;top:110px;transform:translateX(-50%);padding:10px 15px;border-radius:10px;color:#ddd;opacity:0;transition:.2s}
+#hint.show{opacity:1}
+#message{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#0008;pointer-events:auto}
+#modal{width:min(470px,calc(100vw - 36px));padding:30px;border-radius:20px;text-align:center}
+#modal h1{margin:0 0 8px;font-size:32px}
+#modal p{color:#aaa;line-height:1.55;margin:0}
+.modalBtns{margin-top:20px;display:flex;gap:9px;justify-content:center;flex-wrap:wrap}
+.modalBtn{padding:11px 18px;border-radius:10px;border:1px solid #777;background:#111;color:#eee;font-weight:800;cursor:pointer}
+.modalBtn.primary{background:linear-gradient(#fff,#aaa);color:#050505;border-color:#fff}
+@media(max-width:650px){
+ #exit{top:95px;right:12px}
+ #info{left:12px;top:12px}
+ #actions{left:12px;right:auto;bottom:50px}
+ #help{bottom:12px;font-size:9px}
+}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div id="info" class="panel">
+    <div class="eyebrow">PLAYGUMAI // UNPACK</div>
+    <div id="roomTitle">A New Room</div>
+    <div id="objective">Drag every item from the box and place it where it belongs.</div>
+    <div id="stats">Room 1 / 3 · Unpacked 0 / 8</div>
+  </div>
+
+  <button id="exit">EXIT GAME</button>
+
+  <div id="hint" class="panel">Look for the faint outline — it shows where the item belongs.</div>
+
+  <div id="actions">
+    <button class="action" id="hintBtn">HINT</button>
+    <button class="action" id="resetBtn">RESET ROOM</button>
+  </div>
+
+  <div id="help" class="panel">Drag items from the box into their matching outlined places · R = reset · H = hint · Esc = exit</div>
+
+  <div id="message">
+    <div id="modal" class="panel">
+      <h1 id="msgTitle">ROOM COMPLETE</h1>
+      <p id="msgText"></p>
+      <div class="modalBtns">
+        <button class="modalBtn" id="again">PLAY AGAIN</button>
+        <button class="modalBtn primary" id="msgExit">EXIT GAME</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+let W=innerWidth,H=innerHeight,dpr=1;
+function resize(){
+ W=innerWidth;H=innerHeight;dpr=Math.min(devicePixelRatio||1,2);
+ canvas.width=W*dpr;canvas.height=H*dpr;
+ canvas.style.width=W+"px";canvas.style.height=H+"px";
+ ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+addEventListener("resize",resize);resize();
+
+const rooms=[
+ {name:"First Apartment",color:"#191919",items:[
+  {id:"book",name:"Book",type:"book",home:[.24,.31],size:[48,32]},
+  {id:"lamp",name:"Lamp",type:"lamp",home:[.73,.27],size:[45,78]},
+  {id:"mug",name:"Mug",type:"mug",home:[.62,.63],size:[38,42]},
+  {id:"plant",name:"Plant",type:"plant",home:[.82,.66],size:[60,72]},
+  {id:"clock",name:"Clock",type:"clock",home:[.42,.25],size:[52,52]},
+  {id:"console",name:"Console",type:"console",home:[.31,.70],size:[80,35]},
+  {id:"photo",name:"Photo",type:"photo",home:[.55,.31],size:[48,58]},
+  {id:"toy",name:"Toy",type:"toy",home:[.72,.75],size:[45,35]}
+ ]},
+ {name:"Bedroom",color:"#171717",items:[
+  {id:"pillow",name:"Pillow",type:"pillow",home:[.27,.34],size:[76,45]},
+  {id:"headphones",name:"Headphones",type:"headphones",home:[.70,.29],size:[58,58]},
+  {id:"shoes",name:"Shoes",type:"shoes",home:[.78,.76],size:[70,34]},
+  {id:"book2",name:"Book",type:"book",home:[.34,.72],size:[48,32]},
+  {id:"plant2",name:"Plant",type:"plant",home:[.85,.47],size:[60,72]},
+  {id:"camera",name:"Camera",type:"camera",home:[.53,.32],size:[55,42]},
+  {id:"watch",name:"Watch",type:"watch",home:[.58,.67],size:[50,28]},
+  {id:"tshirt",name:"T-Shirt",type:"shirt",home:[.24,.65],size:[62,60]}
+ ]},
+ {name:"Creative Studio",color:"#151515",items:[
+  {id:"brush",name:"Brushes",type:"brush",home:[.24,.29],size:[65,38]},
+  {id:"paint",name:"Paint",type:"paint",home:[.48,.27],size:[52,44]},
+  {id:"tablet",name:"Tablet",type:"tablet",home:[.71,.30],size:[85,50]},
+  {id:"plant3",name:"Plant",type:"plant",home:[.85,.68],size:[60,72]},
+  {id:"notebook",name:"Notebook",type:"book",home:[.27,.72],size:[52,35]},
+  {id:"camera2",name:"Camera",type:"camera",home:[.55,.67],size:[55,42]},
+  {id:"mug2",name:"Mug",type:"mug",home:[.72,.73],size:[38,42]},
+  {id:"speaker",name:"Speaker",type:"speaker",home:[.42,.63],size:[55,65]}
+ ]}
+];
+
+let roomIndex=0,items=[],drag=null,completed=0,moves=0,particles=[],shake=0;
+
+function room(){return rooms[roomIndex]}
+function layout(){
+ const left=Math.max(45,W*.10),top=Math.max(135,H*.19);
+ const rw=Math.min(W-left*2,1050),rh=Math.min(H-top-85,600);
+ return {x:left,y:top,w:rw,h:rh};
+}
+function homePos(item){
+ const r=layout();
+ return {x:r.x+r.w*item.home[0],y:r.y+r.h*item.home[1]};
+}
+function boxRect(){
+ const r=layout();
+ return {x:r.x+20,y:r.y+r.h-105,w:170,h:82};
+}
+function resetRoom(){
+ items=room().items.map((o,i)=>({...o,placed:false,x:0,y:0,homeX:0,homeY:0,rotation:(i%3-1)*.04}));
+ items.forEach(o=>{const p=homePos(o);o.homeX=p.x;o.homeY=p.y;});
+ // Place all items inside the moving box.
+ items.forEach((o,i)=>{
+   const b=boxRect();
+   o.x=b.x+38+(i%4)*36;
+   o.y=b.y+25+Math.floor(i/4)*35;
+ });
+ completed=0;moves=0;drag=null;updateUI();
+}
+function updateUI(){
+ document.getElementById("roomTitle").textContent=room().name;
+ document.getElementById("stats").textContent=`Room ${roomIndex+1} / ${rooms.length} · Unpacked ${completed} / ${items.length}`;
+}
+function point(e){
+ const r=canvas.getBoundingClientRect();
+ return {x:e.clientX-r.left,y:e.clientY-r.top};
+}
+function hit(item,p){
+ return Math.abs(p.x-item.x)<Math.max(25,item.size[0]*.6)&&Math.abs(p.y-item.y)<Math.max(25,item.size[1]*.6);
+}
+function startDrag(e){
+ if(document.getElementById("message").style.display==="flex")return;
+ const p=point(e);
+ for(let i=items.length-1;i>=0;i--){
+  const it=items[i];
+  if(!it.placed&&hit(it,p)){
+   drag={item:it,dx:p.x-it.x,dy:p.y-it.y};
+   moves++;updateUI();canvas.setPointerCapture?.(e.pointerId);break;
+  }
+ }
+}
+function moveDrag(e){
+ if(!drag)return;
+ const p=point(e);
+ drag.item.x=p.x-drag.dx;drag.item.y=p.y-drag.dy;
+}
+function endDrag(){
+ if(!drag)return;
+ const it=drag.item;
+ const d=Math.hypot(it.x-it.homeX,it.y-it.homeY);
+ if(d<75){
+   it.x=it.homeX;it.y=it.homeY;it.placed=true;completed++;
+   burst(it.x,it.y,15);
+   if(completed===items.length)setTimeout(nextRoom,600);
+ }else{
+   // Return to box.
+   const b=boxRect(),idx=items.indexOf(it);
+   it.x=b.x+38+(idx%4)*36;it.y=b.y+25+Math.floor(idx/4)*35;
+   shake=5;
+ }
+ drag=null;updateUI();
+}
+canvas.addEventListener("pointerdown",startDrag);
+canvas.addEventListener("pointermove",moveDrag);
+canvas.addEventListener("pointerup",endDrag);
+canvas.addEventListener("pointercancel",endDrag);
+
+function nextRoom(){
+ if(roomIndex<rooms.length-1){roomIndex++;resetRoom();return}
+ document.getElementById("msgTitle").textContent="HOME, FINALLY";
+ document.getElementById("msgText").textContent=`You unpacked all ${rooms.reduce((a,r)=>a+r.items.length,0)} objects and finished all three rooms.`;
+ document.getElementById("message").style.display="flex";
+}
+function exitGame(){window.history.back()}
+document.getElementById("exit").onclick=exitGame;
+document.getElementById("msgExit").onclick=exitGame;
+document.getElementById("again").onclick=()=>{roomIndex=0;resetRoom();document.getElementById("message").style.display="none"};
+document.getElementById("resetBtn").onclick=resetRoom;
+document.getElementById("hintBtn").onclick=()=>{
+ const it=items.find(i=>!i.placed);
+ if(!it)return;
+ const h=document.getElementById("hint");
+ h.textContent=`Place the ${it.name} in its glowing outline.`;
+ h.classList.add("show");setTimeout(()=>h.classList.remove("show"),2200);
+};
+addEventListener("keydown",e=>{
+ if(e.key==="Escape")exitGame();
+ if(e.key.toLowerCase()==="r")resetRoom();
+ if(e.key.toLowerCase()==="h")document.getElementById("hintBtn").click();
+});
+
+function burst(x,y,n){
+ for(let i=0;i<n;i++){
+  const a=Math.random()*Math.PI*2,s=30+Math.random()*120;
+  particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.4+Math.random()*.7});
+ }
+}
+function drawRoom(){
+ const r=layout();
+ // wall
+ const wall=ctx.createLinearGradient(0,r.y,0,r.y+r.h);
+ wall.addColorStop(0,"#252525");wall.addColorStop(1,room().color);
+ ctx.fillStyle=wall;ctx.fillRect(r.x,r.y,r.w,r.h);
+ // floor
+ ctx.fillStyle="#0e0e0e";ctx.fillRect(r.x,r.y+r.h*.76,r.w,r.h*.24);
+ // floor boards
+ ctx.strokeStyle="#252525";ctx.lineWidth=1;
+ for(let x=r.x;x<r.x+r.w;x+=55){ctx.beginPath();ctx.moveTo(x,r.y+r.h*.76);ctx.lineTo(x,r.y+r.h);ctx.stroke()}
+ // window
+ ctx.fillStyle="#090909";ctx.fillRect(r.x+r.w*.07,r.y+r.h*.10,r.w*.16,r.h*.30);
+ ctx.strokeStyle="#777";ctx.strokeRect(r.x+r.w*.07,r.y+r.h*.10,r.w*.16,r.h*.30);
+ ctx.strokeStyle="#333";ctx.beginPath();ctx.moveTo(r.x+r.w*.15,r.y+r.h*.10);ctx.lineTo(r.x+r.w*.15,r.y+r.h*.40);ctx.moveTo(r.x+r.w*.07,r.y+r.h*.25);ctx.lineTo(r.x+r.w*.23,r.y+r.h*.25);ctx.stroke();
+ // simple furniture
+ ctx.fillStyle="#202020";ctx.fillRect(r.x+r.w*.55,r.y+r.h*.51,r.w*.27,r.h*.05);
+ ctx.fillStyle="#151515";ctx.fillRect(r.x+r.w*.57,r.y+r.h*.56,r.w*.025,r.h*.20);ctx.fillRect(r.x+r.w*.79,r.y+r.h*.56,r.w*.025,r.h*.20);
+ ctx.fillStyle="#252525";ctx.fillRect(r.x+r.w*.04,r.y+r.h*.52,r.w*.22,r.h*.24);
+}
+function drawTarget(it){
+ const x=it.homeX,y=it.homeY,w=it.size[0],h=it.size[1];
+ ctx.save();ctx.translate(x,y);
+ ctx.strokeStyle="rgba(255,255,255,.25)";ctx.setLineDash([5,5]);ctx.lineWidth=2;
+ ctx.strokeRect(-w/2,-h/2,w,h);ctx.setLineDash([]);
+ ctx.fillStyle="rgba(255,255,255,.025)";ctx.fillRect(-w/2,-h/2,w,h);
+ ctx.restore();
+}
+function drawItem(it){
+ const x=it.x,y=it.y,w=it.size[0],h=it.size[1];
+ ctx.save();ctx.translate(x,y);ctx.rotate(it.rotation||0);
+ ctx.shadowColor="#0009";ctx.shadowBlur=10;ctx.shadowOffsetY=7;
+ const silver=ctx.createLinearGradient(0,-h/2,0,h/2);
+ silver.addColorStop(0,"#f5f5f5");silver.addColorStop(.45,"#aaa");silver.addColorStop(1,"#444");
+ ctx.fillStyle=silver;
+ // distinct simple object silhouettes
+ switch(it.type){
+  case"book":ctx.fillRect(-w/2,-h/2,w,h);ctx.fillStyle="#333";ctx.fillRect(-w/2+7,-h/2,4,h);break;
+  case"lamp":ctx.beginPath();ctx.moveTo(-w/2,-h/2+10);ctx.lineTo(w/2,-h/2+10);ctx.lineTo(w*.32,0);ctx.lineTo(-w*.32,0);ctx.closePath();ctx.fill();ctx.fillRect(-3,0,6,h*.55);ctx.fillRect(-w*.22,h*.48,w*.44,5);break;
+  case"mug":ctx.beginPath();ctx.roundRect(-w/2,-h/2,w*.75,h,8);ctx.fill();ctx.strokeStyle="#ddd";ctx.lineWidth=5;ctx.beginPath();ctx.arc(w*.22,0,10,-Math.PI/2,Math.PI/2);ctx.stroke();break;
+  case"plant":ctx.fillStyle="#555";ctx.fillRect(-12,5,24,20);ctx.fillStyle="#bbb";for(let i=0;i<5;i++){ctx.beginPath();ctx.ellipse((i-2)*8,-12-Math.abs(i-2)*3,9,18,(i-2)*.25,0,Math.PI*2);ctx.fill()}break;
+  case"clock":ctx.beginPath();ctx.arc(0,0,w/2,0,Math.PI*2);ctx.fill();ctx.strokeStyle="#333";ctx.lineWidth=3;ctx.stroke();ctx.strokeStyle="#111";ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(0,-15);ctx.moveTo(0,0);ctx.lineTo(12,7);ctx.stroke();break;
+  case"console":ctx.fillRect(-w/2,-h/2,w,h);ctx.fillStyle="#222";ctx.fillRect(-w*.35,-h*.25,w*.7,h*.35);ctx.fillStyle="#eee";ctx.beginPath();ctx.arc(w*.3,0,4,0,Math.PI*2);ctx.fill();break;
+  case"photo":ctx.fillRect(-w/2,-h/2,w,h);ctx.fillStyle="#222";ctx.beginPath();ctx.arc(0,-4,8,0,Math.PI*2);ctx.fill();ctx.fillRect(-14,7,28,4);break;
+  case"toy":ctx.beginPath();ctx.arc(0,0,Math.min(w,h)/2,0,Math.PI*2);ctx.fill();ctx.fillStyle="#222";ctx.beginPath();ctx.arc(-7,-4,3,0,Math.PI*2);ctx.arc(7,-4,3,0,Math.PI*2);ctx.fill();break;
+  case"pillow":ctx.beginPath();ctx.roundRect(-w/2,-h/2,w,h,12);ctx.fill();break;
+  case"headphones":ctx.strokeStyle="#ddd";ctx.lineWidth=7;ctx.beginPath();ctx.arc(0,2,24,Math.PI,0);ctx.stroke();ctx.fillRect(-29,0,10,24);ctx.fillRect(19,0,10,24);break;
+  case"shoes":ctx.beginPath();ctx.ellipse(-15,4,24,11,0,0,Math.PI*2);ctx.ellipse(18,-1,24,11,0,0,Math.PI*2);ctx.fill();break;
+  case"camera":ctx.fillRect(-w/2,-h/2,w,h);ctx.fillStyle="#333";ctx.beginPath();ctx.arc(0,2,12,0,Math.PI*2);ctx.fill();break;
+  case"watch":ctx.fillRect(-w/2,-h*.25,w,h*.5);ctx.fillStyle="#222";ctx.beginPath();ctx.arc(0,0,9,0,Math.PI*2);ctx.fill();break;
+  case"shirt":ctx.beginPath();ctx.moveTo(-w*.35,-h*.45);ctx.lineTo(-w*.5,-h*.2);ctx.lineTo(-w*.25,0);ctx.lineTo(-w*.2,h*.45);ctx.lineTo(w*.2,h*.45);ctx.lineTo(w*.25,0);ctx.lineTo(w*.5,-h*.2);ctx.lineTo(w*.35,-h*.45);ctx.closePath();ctx.fill();break;
+  case"brush":for(let i=-2;i<=2;i++){ctx.fillRect(i*11,-h*.45,5,h*.9);ctx.beginPath();ctx.arc(i*11,-h*.45,5,Math.PI,0);ctx.fill()}break;
+  case"paint":ctx.beginPath();ctx.roundRect(-w/2,-h/2,w,h,8);ctx.fill();ctx.fillStyle="#333";ctx.beginPath();ctx.arc(-12,0,6,0,Math.PI*2);ctx.arc(2,-5,6,0,Math.PI*2);ctx.arc(14,6,6,0,Math.PI*2);ctx.fill();break;
+  case"tablet":ctx.fillRect(-w/2,-h/2,w,h);ctx.fillStyle="#202020";ctx.fillRect(-w*.4,-h*.32,w*.8,h*.64);break;
+  case"speaker":ctx.fillRect(-w/2,-h/2,w,h);ctx.fillStyle="#222";ctx.beginPath();ctx.arc(0,-12,8,0,Math.PI*2);ctx.arc(0,12,12,0,Math.PI*2);ctx.fill();break;
+  default:ctx.fillRect(-w/2,-h/2,w,h);
+ }
+ ctx.shadowColor="transparent";ctx.restore();
+}
+function drawBox(){
+ const b=boxRect();
+ ctx.fillStyle="#151515";ctx.strokeStyle="#888";ctx.lineWidth=2;
+ ctx.fillRect(b.x,b.y,b.w,b.h);ctx.strokeRect(b.x,b.y,b.w,b.h);
+ ctx.strokeStyle="#555";ctx.beginPath();ctx.moveTo(b.x+b.w/2,b.y);ctx.lineTo(b.x+b.w/2,b.y+b.h);ctx.stroke();
+ ctx.fillStyle="#888";ctx.font="bold 10px Segoe UI";ctx.textAlign="center";ctx.fillText("UNPACKED BOX",b.x+b.w/2,b.y+b.h-8);
+}
+function draw(){
+ ctx.clearRect(0,0,W,H);
+ const bg=ctx.createRadialGradient(W*.5,H*.45,20,W*.5,H*.45,Math.max(W,H));
+ bg.addColorStop(0,"#1b1b1b");bg.addColorStop(1,"#030303");ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+ drawRoom();
+ // targets behind objects
+ items.forEach(it=>{if(!it.placed)drawTarget(it)});
+ drawBox();
+ items.forEach(it=>{if(!it.placed)drawItem(it);else drawItem(it)});
+ if(drag)drawItem(drag.item);
+}
+let last=performance.now();
+function loop(t){
+ const dt=Math.min(.033,(t-last)/1000);last=t;
+ for(let i=particles.length-1;i>=0;i--){const p=particles[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;if(p.life<=0)particles.splice(i,1)}
+ draw();
+ ctx.globalAlpha=1;
+ for(const p of particles){ctx.globalAlpha=Math.max(0,p.life);ctx.fillStyle="#fff";ctx.fillRect(p.x,p.y,3,3)}
+ ctx.globalAlpha=1;
+ requestAnimationFrame(loop);
+}
+resetRoom();requestAnimationFrame(loop);
+</script>
+</body>
+</html>

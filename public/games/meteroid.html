@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>PlayGumAI — Dread Sector</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#020305;color:#edf3f7;font-family:Inter,Segoe UI,Arial,sans-serif}
+canvas{display:block;width:100vw;height:100vh;background:#020305}
+#hud{position:fixed;inset:0;pointer-events:none}
+.card{background:rgba(4,7,10,.78);border:1px solid rgba(220,230,238,.24);box-shadow:0 12px 35px #0009,inset 0 1px #fff1;backdrop-filter:blur(9px)}
+#stats{position:absolute;left:20px;top:18px;width:235px;padding:13px 15px;border-radius:12px}
+.label{font-size:10px;letter-spacing:2px;color:#9ca8b1}
+.value{font-size:18px;font-weight:800;margin-top:3px}
+.bar{height:7px;background:#20272d;border-radius:10px;overflow:hidden;margin-top:8px}
+#hpBar{height:100%;width:100%;background:linear-gradient(90deg,#d9e0e5,#fff)}
+#boss{position:absolute;left:50%;top:18px;transform:translateX(-50%);width:min(420px,55vw);display:none;text-align:center;padding:11px 16px;border-radius:12px}
+#bossBar{height:8px;background:#262c31;margin-top:7px;border-radius:8px;overflow:hidden}
+#bossFill{height:100%;width:100%;background:#eef3f6}
+#exit{position:absolute;right:20px;top:18px;pointer-events:auto;border:1px solid #dce3e8;background:linear-gradient(#fff,#aeb8c0);color:#050607;font-weight:900;padding:10px 18px;border-radius:10px;cursor:pointer;box-shadow:0 5px 18px #0008}
+#exit:hover{filter:brightness(1.12)}
+#objective{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);padding:10px 15px;border-radius:10px;color:#c4cdd4;font-size:12px;white-space:nowrap}
+#message{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(440px,90vw);padding:30px;text-align:center;border-radius:18px;display:none;pointer-events:auto}
+#message h1{margin:0 0 10px;font-size:31px}
+#message p{margin:0;color:#b9c3ca;line-height:1.55}
+#message button{margin:17px 6px 0;border:0;border-radius:10px;padding:11px 19px;font-weight:900;cursor:pointer}
+#restart{background:#fff;color:#050607}
+#back{background:linear-gradient(#fff,#aeb8c0);color:#050607}
+#controls{position:absolute;right:20px;bottom:18px;padding:9px 12px;border-radius:9px;color:#9ea9b1;font-size:11px}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+  <div id="stats" class="card">
+    <div class="label">DREAD SECTOR // SUIT</div>
+    <div class="value">ENERGY <span id="hpText">100</span></div>
+    <div class="bar"><div id="hpBar"></div></div>
+    <div class="value" style="font-size:14px;margin-top:10px">DATA CORES <span id="cores">0</span>/4</div>
+  </div>
+
+  <div id="boss" class="card">
+    <div class="label">HOSTILE // SENTINEL</div>
+    <div style="font-weight:900;margin-top:3px">SECTOR GUARDIAN</div>
+    <div id="bossBar"><div id="bossFill"></div></div>
+  </div>
+
+  <button id="exit">EXIT GAME</button>
+
+  <div id="objective" class="card">Explore the sector • collect 4 data cores • reach extraction</div>
+  <div id="controls" class="card">WASD / Arrows: Move • Space: Jump • Mouse / J: Shoot</div>
+
+  <div id="message" class="card">
+    <h1 id="msgTitle"></h1>
+    <p id="msgText"></p>
+    <button id="restart">RESTART</button>
+    <button id="back">EXIT GAME</button>
+  </div>
+</div>
+
+<script>
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+let W=innerWidth,H=innerHeight,dpr=Math.min(devicePixelRatio||1,2);
+function resize(){W=innerWidth;H=innerHeight;canvas.width=W*dpr;canvas.height=H*dpr;canvas.style.width=W+"px";canvas.style.height=H+"px";ctx.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener("resize",resize);resize();
+
+const keys={};
+addEventListener("keydown",e=>{
+  keys[e.key.toLowerCase()]=true;
+  if(["arrowup","arrowdown","arrowleft","arrowright"," ","j"].includes(e.key.toLowerCase()))e.preventDefault();
+});
+addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+
+let mouse={x:W/2,y:H/2,down:false};
+addEventListener("mousemove",e=>{mouse.x=e.clientX;mouse.y=e.clientY});
+addEventListener("mousedown",()=>mouse.down=true);
+addEventListener("mouseup",()=>mouse.down=false);
+
+const world={w:3200,h:1800};
+const player={x:180,y:1200,w:30,h:48,vx:0,vy:0,onGround:false,hp:100,cores:0,face:1,shootCd:0,inv:0};
+const cores=[
+  {x:620,y:1060,taken:false},
+  {x:1260,y:720,taken:false},
+  {x:2050,y:1080,taken:false},
+  {x:2540,y:570,taken:false}
+];
+const platforms=[
+  {x:0,y:1320,w:700,h:480},{x:800,y:1320,w:650,h:480},
+  {x:1550,y:1320,w:750,h:480},{x:2400,y:1320,w:800,h:480},
+  {x:350,y:1120,w:420,h:35},{x:900,y:970,w:420,h:35},
+  {x:1450,y:1060,w:430,h:35},{x:1900,y:850,w:430,h:35},
+  {x:2280,y:700,w:450,h:35},{x:2700,y:470,w:380,h:35}
+];
+const enemies=[
+  {x:560,y:1050,w:32,h:32,hp:30,dir:1},
+  {x:1080,y:925,w:32,h:32,hp:30,dir:-1},
+  {x:1710,y:1015,w:32,h:32,hp:35,dir:1},
+  {x:2160,y:805,w:32,h:32,hp:35,dir:-1}
+];
+const bullets=[],enemyBullets=[],particles=[];
+const boss={x:2920,y:1180,w:100,h:90,hp:180,max:180,active:false,cd:1.2};
+let camX=0,camY=0,last=performance.now(),gameOver=false,win=false,exitRequested=false;
+
+const rect=(x,y,w,h)=>({x,y,w,h});
+function overlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y}
+function centerX(o){return o.x+o.w/2}
+function centerY(o){return o.y+o.h/2}
+function burst(x,y,n=10){
+  for(let i=0;i<n;i++){let a=Math.random()*Math.PI*2,s=40+Math.random()*180;particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.3+Math.random()*.6})}
+}
+function reset(){
+  player.x=180;player.y=1200;player.vx=0;player.vy=0;player.hp=100;player.cores=0;player.shootCd=0;player.inv=0;
+  cores.forEach(c=>c.taken=false);
+  enemies[0].x=560;enemies[1].x=1080;enemies[2].x=1710;enemies[3].x=2160;
+  enemies.forEach(e=>e.hp=35);
+  boss.hp=boss.max;boss.active=false;boss.cd=1.2;
+  bullets.length=0;enemyBullets.length=0;particles.length=0;
+  gameOver=false;win=false;document.getElementById("message").style.display="none";
+  document.getElementById("boss").style.display="none";
+  requestAnimationFrame(loop);
+}
+function showMessage(title,text){
+  gameOver=true;document.getElementById("msgTitle").textContent=title;document.getElementById("msgText").textContent=text;document.getElementById("message").style.display="block";
+}
+function exitGame(){window.history.back()}
+document.getElementById("exit").onclick=exitGame;
+document.getElementById("back").onclick=exitGame;
+document.getElementById("restart").onclick=reset;
+
+function shoot(){
+  if(player.shootCd>0)return;
+  player.shootCd=.16;
+  const px=player.x+player.w/2,py=player.y+20;
+  const tx=mouse.x+camX,ty=mouse.y+camY;
+  let a=Math.atan2(ty-py,tx-px);
+  if(!isFinite(a))a=player.face>0?0:Math.PI;
+  bullets.push({x:px,y:py,vx:Math.cos(a)*760,vy:Math.sin(a)*760,life:1.2});
+  burst(px+Math.cos(a)*18,py+Math.sin(a)*18,3);
+}
+
+function update(dt){
+  if(gameOver)return;
+  player.shootCd=Math.max(0,player.shootCd-dt);
+  player.inv=Math.max(0,player.inv-dt);
+
+  let ax=0;
+  if(keys.a||keys.arrowleft)ax=-1;
+  if(keys.d||keys.arrowright)ax=1;
+  if(ax)player.face=ax;
+  player.vx+=ax*1100*dt;
+  player.vx*=Math.pow(.0005,dt);
+  player.vx=Math.max(-300,Math.min(300,player.vx));
+  if((keys.w||keys.arrowup||keys[" "])&&player.onGround){player.vy=-650;player.onGround=false}
+  player.vy+=1450*dt;
+  const oldY=player.y;
+  player.x+=player.vx*dt;
+  player.x=Math.max(0,Math.min(world.w-player.w,player.x));
+  player.y+=player.vy*dt;
+  player.onGround=false;
+  for(const p of platforms){
+    if(player.vy>=0 && player.x+player.w>p.x && player.x<p.x+p.w && oldY+player.h<=p.y && player.y+player.h>=p.y){
+      player.y=p.y-player.h;player.vy=0;player.onGround=true;
+    }
+  }
+  if(player.y>world.h+200){damage(100)}
+
+  cores.forEach(c=>{
+    if(!c.taken && Math.hypot(centerX(player)-c.x,centerY(player)-c.y)<45){
+      c.taken=true;player.cores++;burst(c.x,c.y,20);
+    }
+  });
+
+  enemies.forEach(e=>{
+    if(e.hp<=0)return;
+    const dx=centerX(player)-centerX(e);
+    if(Math.abs(dx)<450){
+      e.dir=dx>0?1:-1;
+      e.x+=e.dir*70*dt;
+    }else e.x+=e.dir*35*dt;
+    const onSame=Math.abs(centerY(player)-centerY(e))<90;
+    if(onSame && Math.random()<dt*.7){
+      enemyBullets.push({x:centerX(e),y:centerY(e),vx:dx>0?260:-260,vy:0,life:2});
+    }
+    if(overlap(player,e))damage(22*dt);
+  });
+
+  if(player.cores===4 && !boss.active){
+    boss.active=true;document.getElementById("boss").style.display="block";
+    document.getElementById("objective").textContent="Guardian awakened • defeat it to reach extraction";
+  }
+  if(boss.active && boss.hp>0){
+    const dx=centerX(player)-centerX(boss);
+    boss.x+=Math.sign(dx)*25*dt;
+    boss.cd-=dt;
+    if(boss.cd<=0){
+      boss.cd=1.1;
+      enemyBullets.push({x:centerX(boss),y:centerY(boss),vx:dx>0?300:-300,vy:-40+Math.random()*80,life:2.2});
+      enemyBullets.push({x:centerX(boss),y:centerY(boss),vx:dx>0?250:-250,vy:70,life:2.2});
+    }
+    if(overlap(player,boss))damage(30*dt);
+  }
+  if(boss.active&&boss.hp<=0&&player.x>3000)finish();
+
+  if(mouse.down||keys.j)shoot();
+
+  for(let i=bullets.length-1;i>=0;i--){
+    const b=bullets[i];b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;
+    for(const e of enemies){
+      if(e.hp>0&&Math.hypot(b.x-centerX(e),b.y-centerY(e))<30){e.hp-=15;b.life=0;burst(b.x,b.y,6);break}
+    }
+    if(b.life>0&&boss.active&&boss.hp>0&&Math.hypot(b.x-centerX(boss),b.y-centerY(boss))<65){boss.hp-=8;b.life=0;burst(b.x,b.y,8)}
+    if(b.life<=0||b.x<0||b.x>world.w||b.y<0||b.y>world.h)bullets.splice(i,1);
+  }
+  for(let i=enemyBullets.length-1;i>=0;i--){
+    const b=enemyBullets[i];b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;
+    if(Math.hypot(b.x-centerX(player),b.y-centerY(player))<25){damage(12);b.life=0}
+    if(b.life<=0)enemyBullets.splice(i,1);
+  }
+  for(let i=particles.length-1;i>=0;i--){let p=particles[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;if(p.life<=0)particles.splice(i,1)}
+  camX+=(player.x-W*.35-camX)*Math.min(1,dt*5);
+  camY+=(player.y-H*.5-camY)*Math.min(1,dt*5);
+  camX=Math.max(0,Math.min(world.w-W,camX));camY=Math.max(0,Math.min(world.h-H,camY));
+  document.getElementById("hpText").textContent=Math.max(0,Math.ceil(player.hp));
+  document.getElementById("hpBar").style.width=Math.max(0,player.hp)+"%";
+  document.getElementById("cores").textContent=player.cores;
+  if(boss.active)document.getElementById("bossFill").style.width=Math.max(0,boss.hp/boss.max*100)+"%";
+}
+function damage(amount){
+  if(player.inv>0||gameOver)return;
+  player.hp-=amount;player.inv=.5;burst(centerX(player),centerY(player),8);
+  if(player.hp<=0)showMessage("SYSTEM FAILURE","Your suit energy reached zero. Restart the sector and try again.");
+}
+function finish(){win=true;showMessage("SECTOR CLEARED","The guardian is down and the extraction route is open. You completed Dread Sector.");}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const bg=ctx.createLinearGradient(0,0,0,H);bg.addColorStop(0,"#030508");bg.addColorStop(1,"#0b1015");ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+  ctx.save();ctx.translate(-camX,-camY);
+
+  // industrial background
+  for(let x=0;x<world.w;x+=160){ctx.fillStyle=x%320===0?"#0d141a":"#0a1015";ctx.fillRect(x,0,110,world.h)}
+  ctx.strokeStyle="rgba(200,215,225,.09)";
+  for(let x=0;x<world.w;x+=80){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,world.h);ctx.stroke()}
+  for(let y=0;y<world.h;y+=80){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(world.w,y);ctx.stroke()}
+
+  // warning lights
+  for(let x=120;x<world.w;x+=420){ctx.fillStyle="rgba(230,235,238,.08)";ctx.beginPath();ctx.arc(x,180,45,0,Math.PI*2);ctx.fill();ctx.fillStyle="#9da8af";ctx.fillRect(x-4,176,8,8)}
+
+  // platforms
+  platforms.forEach(p=>{
+    ctx.fillStyle="#182128";ctx.fillRect(p.x,p.y,p.w,p.h);
+    ctx.strokeStyle="#73808a";ctx.lineWidth=2;ctx.strokeRect(p.x,p.y,p.w,p.h);
+    ctx.strokeStyle="rgba(235,240,243,.12)";ctx.beginPath();ctx.moveTo(p.x,p.y+9);ctx.lineTo(p.x+p.w,p.y+9);ctx.stroke();
+  });
+
+  // cores
+  cores.forEach(c=>{
+    if(c.taken)return;
+    ctx.save();ctx.translate(c.x,c.y);ctx.rotate(performance.now()/900);
+    ctx.fillStyle="#e9eef2";ctx.beginPath();ctx.moveTo(0,-22);ctx.lineTo(17,0);ctx.lineTo(0,22);ctx.lineTo(-17,0);ctx.closePath();ctx.fill();
+    ctx.fillStyle="#69747d";ctx.beginPath();ctx.arc(0,0,6,0,Math.PI*2);ctx.fill();ctx.restore();
+  });
+
+  // enemies
+  enemies.forEach(e=>{
+    if(e.hp<=0)return;
+    ctx.fillStyle="#252f36";ctx.strokeStyle="#d9e0e4";ctx.lineWidth=2;
+    ctx.fillRect(e.x,e.y,e.w,e.h);ctx.strokeRect(e.x,e.y,e.w,e.h);
+    ctx.fillStyle="#f1f4f6";ctx.fillRect(e.x+(e.dir>0?22:4),e.y+9,6,6);
+  });
+
+  // boss
+  if(boss.active&&boss.hp>0){
+    ctx.fillStyle="#11171c";ctx.strokeStyle="#f0f3f5";ctx.lineWidth=3;
+    ctx.fillRect(boss.x,boss.y,boss.w,boss.h);ctx.strokeRect(boss.x,boss.y,boss.w,boss.h);
+    ctx.fillStyle="#dfe5e9";ctx.fillRect(boss.x+20,boss.y+25,60,12);
+    ctx.fillStyle="#69747d";ctx.fillRect(boss.x+35,boss.y+50,30,25);
+  }
+
+  // bullets
+  bullets.forEach(b=>{ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(b.x,b.y,5,0,Math.PI*2);ctx.fill()});
+  enemyBullets.forEach(b=>{ctx.fillStyle="#aab4bb";ctx.beginPath();ctx.arc(b.x,b.y,6,0,Math.PI*2);ctx.fill()});
+
+  // player
+  ctx.save();ctx.translate(centerX(player),player.y+player.h/2);
+  if(player.inv>0&&Math.floor(player.inv*16)%2===0)ctx.globalAlpha=.35;
+  ctx.fillStyle="#dfe6ea";ctx.strokeStyle="#fff";ctx.lineWidth=2;
+  ctx.beginPath();ctx.roundRect(-15,-24,30,48,9);ctx.fill();ctx.stroke();
+  ctx.fillStyle="#151b20";ctx.beginPath();ctx.arc(player.face*5,-9,9,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#8e9aa3";ctx.fillRect(player.face*10,-3,12,6);
+  ctx.restore();
+
+  particles.forEach(p=>{ctx.globalAlpha=Math.max(0,p.life);ctx.fillStyle="#eef3f6";ctx.fillRect(p.x,p.y,4,4);ctx.globalAlpha=1});
+  ctx.restore();
+
+  // extraction marker
+  if(boss.hp<=0&&boss.active){
+    ctx.fillStyle="#fff";ctx.font="bold 14px Segoe UI";ctx.fillText("EXTRACTION →",W-190,H/2);
+  }
+}
+function loop(t){const dt=Math.min(.033,(t-last)/1000);last=t;update(dt);draw();if(!gameOver)requestAnimationFrame(loop)}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

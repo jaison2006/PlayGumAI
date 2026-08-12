@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PlayGumAI — Valley of Seasons</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#10140d;color:#f4f6df;font-family:Inter,Segoe UI,Arial,sans-serif}
+canvas{display:block;width:100vw;height:100vh}
+#ui{position:fixed;inset:0;pointer-events:none}
+.panel{background:rgba(17,24,13,.86);border:1px solid rgba(225,230,181,.24);box-shadow:0 12px 40px #0009,inset 0 1px #fff2;backdrop-filter:blur(8px)}
+#info{position:absolute;left:18px;top:18px;padding:14px 16px;border-radius:13px;min-width:320px}
+.kicker{font-size:9px;letter-spacing:3px;color:#d4d98b}
+#title{font-size:21px;font-weight:900;margin:5px 0}
+#goal{font-size:13px;color:#c8ceb0;line-height:1.45}
+#stats{margin-top:8px;font-size:11px;color:#9ea98b}
+#exit{position:absolute;right:18px;top:18px;pointer-events:auto;cursor:pointer;padding:10px 18px;border-radius:9px;border:1px solid #fff;background:linear-gradient(#fff,#c5c9b7);color:#10150c;font-weight:900}
+#exit:hover{filter:brightness(1.1);transform:translateY(-1px)}
+#controls{position:absolute;left:50%;bottom:17px;transform:translateX(-50%);padding:9px 14px;border-radius:9px;color:#b8c09e;font-size:11px;white-space:nowrap}
+#clock{position:absolute;right:18px;bottom:18px;padding:12px 15px;border-radius:10px;color:#d5dabd;font-size:11px}
+#overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#090d08c9;pointer-events:auto}
+#modal{width:min(520px,90vw);padding:34px;border-radius:18px;text-align:center}
+#modal h1{margin:0 0 10px;font-size:34px}
+#modal p{color:#c3c9b0;line-height:1.55}
+.action{margin-top:13px;padding:10px 19px;border-radius:9px;font-weight:900;cursor:pointer}
+#restart{background:#172114;color:#f4f6df;border:1px solid #647256}
+#back{margin-left:8px;background:linear-gradient(#fff,#c5c9b7);border:1px solid #fff;color:#10150c}
+@media(max-width:650px){
+#info{left:9px;top:9px;width:calc(100% - 18px);min-width:0}
+#exit{top:108px;right:9px}
+#controls{width:92%;white-space:normal;text-align:center;bottom:105px}
+#clock{left:50%;right:auto;transform:translateX(-50%);bottom:13px}
+}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="ui">
+<div id="info" class="panel">
+ <div class="kicker">PLAYGUMAI // VALLEY OF SEASONS</div>
+ <div id="title">HARVEST DAY</div>
+ <div id="goal">Complete today's valley board: gather 5 wild crops, catch 3 fireflies and repair the old windmill.</div>
+ <div id="stats">Crops: <span id="crops">0/5</span> · Fireflies: <span id="flies">0/3</span> · Coins: <span id="coins">0</span></div>
+</div>
+
+<button id="exit">EXIT GAME</button>
+
+<div id="controls" class="panel">WASD / ARROWS MOVE · SPACE INTERACT · E TOOL ACTION</div>
+<div id="clock" class="panel">DAY 12 · <span id="time">08:00 AM</span></div>
+</div>
+
+<div id="overlay">
+<div id="modal" class="panel">
+ <h1 id="resultTitle"></h1>
+ <p id="resultText"></p>
+ <button id="restart" class="action">NEXT DAY</button>
+ <button id="back" class="action">EXIT GAME</button>
+</div>
+</div>
+
+<script>
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+let W=innerWidth,H=innerHeight,dpr=1;
+function resize(){
+ W=innerWidth;H=innerHeight;dpr=Math.min(devicePixelRatio||1,2);
+ canvas.width=W*dpr;canvas.height=H*dpr;
+ canvas.style.width=W+"px";canvas.style.height=H+"px";
+ ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+addEventListener("resize",resize);resize();
+
+const keys={};
+addEventListener("keydown",e=>{
+ const k=e.key.toLowerCase();keys[k]=true;
+ if(["arrowup","arrowdown","arrowleft","arrowright"," "].includes(k))e.preventDefault();
+ if(k==="escape")exitGame();
+});
+addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+
+let p,crops,flies,rocks,trees,windmill,pond,particles,coins,score,dayTime,finished,last=0;
+
+function reset(){
+ p={x:W*.5,y:H*.62,w:22,h:29,speed:185,dir:1};
+ crops=[
+  {x:W*.22,y:H*.45,on:true},{x:W*.34,y:H*.67,on:true},
+  {x:W*.55,y:H*.35,on:true},{x:W*.68,y:H*.58,on:true},
+  {x:W*.82,y:H*.39,on:true}
+ ];
+ flies=[
+  {x:W*.31,y:H*.25,on:true,vx:25,vy:12},
+  {x:W*.63,y:H*.25,on:true,vx:-20,vy:18},
+  {x:W*.87,y:H*.66,on:true,vx:-28,vy:-15}
+ ];
+ rocks=[
+  {x:W*.18,y:H*.67},{x:W*.28,y:H*.3},{x:W*.46,y:H*.49},
+  {x:W*.73,y:H*.31},{x:W*.9,y:H*.49}
+ ];
+ trees=[
+  {x:W*.1,y:H*.3,s:1.05},{x:W*.18,y:H*.2,s:.8},{x:W*.88,y:H*.24,s:1},
+  {x:W*.76,y:H*.76,s:.9},{x:W*.42,y:H*.77,s:.75}
+ ];
+ windmill={x:W*.77,y:H*.43,repaired:false};
+ pond={x:W*.31,y:H*.67};
+ particles=[];coins=0;score=0;dayTime=8*60;finished=false;
+ document.getElementById("overlay").style.display="none";
+ updateUI();
+}
+
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+function burst(x,y,n=12){
+ for(let i=0;i<n;i++){
+  const a=Math.random()*Math.PI*2,s=25+Math.random()*100;
+  particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.4+Math.random()*.7});
+ }
+}
+function near(x,y,r){return Math.hypot(p.x-x,p.y-y)<r}
+function interact(){
+ // gather crop
+ for(const c of crops)if(c.on&&near(c.x,c.y,38)){c.on=false;coins+=3;score+=100;burst(c.x,c.y,16);return}
+ // catch firefly
+ for(const f of flies)if(f.on&&near(f.x,f.y,35)){f.on=false;coins+=5;score+=150;burst(f.x,f.y,18);return}
+ // repair windmill
+ if(!windmill.repaired&&near(windmill.x,windmill.y,65)){
+  windmill.repaired=true;coins+=15;score+=400;burst(windmill.x,windmill.y,30);return
+ }
+ // stone clearing
+ for(const r of rocks){
+  if(!r.on&&false)continue;
+  if(near(r.x,r.y,30)){r.on=false;coins+=1;score+=30;burst(r.x,r.y,7);return}
+ }
+}
+function update(dt){
+ if(finished)return;
+ let dx=0,dy=0;
+ if(keys.a||keys.arrowleft)dx--;if(keys.d||keys.arrowright)dx++;
+ if(keys.w||keys.arrowup)dy--;if(keys.s||keys.arrowdown)dy++;
+ if(dx||dy){
+  const l=Math.hypot(dx,dy);dx/=l;dy/=l;
+  p.dir=dx<0?-1:dx>0?1:p.dir;
+  p.x+=dx*p.speed*dt;p.y+=dy*p.speed*dt;
+ }
+ p.x=Math.max(35,Math.min(W-35,p.x));p.y=Math.max(105,Math.min(H-70,p.y));
+ if(keys.e||keys[" "]){interact();keys.e=keys[" "]=false}
+ dayTime+=dt*3;
+ if(dayTime>20*60){
+  if(crops.some(c=>c.on)||flies.some(f=>f.on)||!windmill.repaired){
+   finished=true;show(false)
+  }
+ }
+ flies.forEach(f=>{
+  if(!f.on)return;
+  f.x+=f.vx*dt;f.y+=f.vy*dt;
+  if(f.x<50||f.x>W-50)f.vx*=-1;
+  if(f.y<130||f.y>H*.72)f.vy*=-1;
+ });
+ particles.forEach(q=>{q.x+=q.vx*dt;q.y+=q.vy*dt;q.life-=dt});
+ particles=particles.filter(q=>q.life>0);
+
+ if(!crops.some(c=>c.on)&&!flies.some(f=>f.on)&&windmill.repaired){
+  finished=true;score+=1000;show(true)
+ }
+ updateUI();
+}
+function updateUI(){
+ document.getElementById("crops").textContent=(5-crops.filter(c=>c.on).length)+"/5";
+ document.getElementById("flies").textContent=(3-flies.filter(f=>f.on).length)+"/3";
+ document.getElementById("coins").textContent=coins;
+ const h=Math.floor(dayTime/60),m=Math.floor(dayTime%60);
+ const ap=h<12?"AM":"PM",hh=((h+11)%12)+1;
+ document.getElementById("time").textContent=String(hh).padStart(2,"0")+":"+String(m).padStart(2,"0")+" "+ap;
+ document.getElementById("goal").textContent=windmill.repaired&&crops.every(c=>!c.on)&&flies.every(f=>!f.on)?"Valley board complete! Enjoy the sunset.":"Complete today's valley board: gather 5 wild crops, catch 3 fireflies and repair the old windmill.";
+}
+function show(success){
+ document.getElementById("resultTitle").textContent=success?"DAY COMPLETE":"SUNSET";
+ document.getElementById("resultText").textContent=success
+ ?"A perfect valley day. The crops are gathered, the fireflies are safe and the windmill turns again. Score: "+score+"."
+ :"The sun set before the valley board was finished. Score: "+score+".";
+ document.getElementById("overlay").style.display="flex";
+}
+function draw(){
+ ctx.clearRect(0,0,W,H);
+
+ const sky=ctx.createLinearGradient(0,0,0,H);
+ sky.addColorStop(0,"#172b29");sky.addColorStop(.45,"#78977c");sky.addColorStop(1,"#d0aa77");
+ ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+
+ // distant mountains
+ ctx.fillStyle="rgba(37,66,50,.55)";
+ ctx.beginPath();ctx.moveTo(0,H*.46);ctx.lineTo(W*.15,H*.22);ctx.lineTo(W*.29,H*.44);ctx.lineTo(W*.48,H*.18);ctx.lineTo(W*.7,H*.43);ctx.lineTo(W*.86,H*.2);ctx.lineTo(W,H*.43);ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.closePath();ctx.fill();
+
+ // valley ground
+ ctx.fillStyle="#88a86f";ctx.beginPath();ctx.ellipse(W*.5,H*.57,W*.46,H*.36,0,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle="#a7c98a";ctx.beginPath();ctx.ellipse(W*.5,H*.56,W*.39,H*.28,0,0,Math.PI*2);ctx.fill();
+
+ // river
+ ctx.fillStyle="#477f7b";ctx.beginPath();ctx.moveTo(W*.05,H*.73);ctx.bezierCurveTo(W*.28,H*.6,W*.47,H*.82,W*.65,H*.66);ctx.bezierCurveTo(W*.8,H*.55,W*.9,H*.7,W,H*.61);ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.closePath();ctx.fill();
+ ctx.strokeStyle="rgba(230,255,240,.18)";ctx.lineWidth=3;
+ for(let y=H*.7;y<H;y+=25){ctx.beginPath();ctx.moveTo(0,y);ctx.quadraticCurveTo(W*.5,y-8,W,y+3);ctx.stroke()}
+
+ // paths
+ ctx.strokeStyle="#c7a878";ctx.lineWidth=32;ctx.lineCap="round";
+ ctx.beginPath();ctx.moveTo(W*.12,H*.68);ctx.quadraticCurveTo(W*.5,H*.48,W*.83,H*.57);ctx.stroke();
+ ctx.strokeStyle="#dec08d";ctx.lineWidth=15;
+ ctx.beginPath();ctx.moveTo(W*.12,H*.68);ctx.quadraticCurveTo(W*.5,H*.48,W*.83,H*.57);ctx.stroke();
+
+ // trees
+ trees.forEach(t=>{
+  ctx.save();ctx.translate(t.x,t.y);ctx.scale(t.s,t.s);
+  ctx.fillStyle="#704b32";ctx.fillRect(-7,5,14,35);
+  ctx.fillStyle="#386b43";ctx.beginPath();ctx.arc(-17,0,24,0,Math.PI*2);ctx.arc(16,-2,27,0,Math.PI*2);ctx.arc(0,-24,30,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#5c8d55";ctx.beginPath();ctx.arc(-7,-29,17,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+ });
+
+ // rocks
+ rocks.forEach(r=>{
+  if(r.on===false)return;
+  ctx.fillStyle="#777e70";ctx.beginPath();ctx.ellipse(r.x,r.y,21,14,-.2,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#a9afa0";ctx.beginPath();ctx.ellipse(r.x-5,r.y-5,9,4,-.2,0,Math.PI*2);ctx.fill();
+ });
+
+ // crops
+ crops.forEach(c=>{
+  if(!c.on)return;
+  ctx.strokeStyle="#426e40";ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(c.x,c.y+10);ctx.lineTo(c.x,c.y-5);ctx.stroke();
+  ctx.fillStyle="#d4e26e";ctx.beginPath();ctx.ellipse(c.x-7,c.y-5,8,4,-.5,0,Math.PI*2);ctx.ellipse(c.x+7,c.y-7,8,4,.5,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#c9844b";ctx.beginPath();ctx.arc(c.x,c.y+7,7,0,Math.PI*2);ctx.fill();
+ });
+
+ // pond
+ ctx.fillStyle="#4b8b86";ctx.beginPath();ctx.ellipse(pond.x,pond.y,55,32,0,0,Math.PI*2);ctx.fill();
+ ctx.strokeStyle="#a9ded1";ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(pond.x,pond.y,55,32,0,0,Math.PI*2);ctx.stroke();
+
+ // windmill
+ ctx.save();ctx.translate(windmill.x,windmill.y);
+ ctx.fillStyle="#765139";ctx.fillRect(-15,-35,30,70);
+ ctx.fillStyle="#e4d6b0";ctx.beginPath();ctx.moveTo(-25,-35);ctx.lineTo(0,-58);ctx.lineTo(25,-35);ctx.closePath();ctx.fill();
+ ctx.strokeStyle=windmill.repaired?"#e9e5c8":"#766e5c";ctx.lineWidth=4;
+ for(let i=0;i<4;i++){ctx.rotate(Math.PI/2);ctx.beginPath();ctx.moveTo(0,-6);ctx.lineTo(0,-42);ctx.stroke()}
+ ctx.restore();
+
+ // fireflies
+ flies.forEach(f=>{
+  if(!f.on)return;
+  ctx.shadowBlur=18;ctx.shadowColor="#eaff9c";ctx.fillStyle="#f5ffb0";ctx.beginPath();ctx.arc(f.x,f.y,5,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
+ });
+
+ // particles
+ particles.forEach(q=>{ctx.globalAlpha=Math.max(0,q.life);ctx.fillStyle="#e9f3a3";ctx.fillRect(q.x,q.y,3,3)});ctx.globalAlpha=1;
+
+ // player
+ ctx.save();ctx.translate(p.x,p.y);
+ ctx.fillStyle="#e7eadb";ctx.beginPath();ctx.arc(0,-12,9,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle="#4f6d48";ctx.fillRect(-10,-3,20,22);
+ ctx.fillStyle="#b77c50";ctx.fillRect(-12,18,9,7);ctx.fillRect(3,18,9,7);
+ ctx.fillStyle="#d5bb8a";ctx.fillRect(p.dir*6,-14,3,3);
+ ctx.restore();
+}
+function loop(t){const dt=Math.min(.033,(t-last)/1000);last=t;update(dt);draw();requestAnimationFrame(loop)}
+function exitGame(){if(history.length>1)history.back();else location.href="/"}
+document.getElementById("exit").onclick=exitGame;
+document.getElementById("back").onclick=exitGame;
+document.getElementById("restart").onclick=reset;
+reset();last=performance.now();requestAnimationFrame(loop);
+</script>
+</body>
+</html>

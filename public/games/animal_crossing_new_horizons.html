@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PlayGumAI — Island Afterglow</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#07100d;color:#eef5ef;font-family:Inter,Segoe UI,Arial,sans-serif}
+canvas{display:block;width:100vw;height:100vh}
+#hud{position:fixed;inset:0;pointer-events:none}
+.panel{background:rgba(7,18,14,.84);border:1px solid rgba(214,239,218,.22);box-shadow:0 12px 40px #0008,inset 0 1px #fff1;backdrop-filter:blur(9px)}
+#mission{position:absolute;left:18px;top:18px;padding:13px 16px;border-radius:13px;min-width:285px}
+.kicker{font-size:9px;letter-spacing:3px;color:#b7d7bd}
+#title{font-size:21px;font-weight:900;margin:5px 0;color:#edf8ef}
+#objective{font-size:13px;color:#bfd1c3;line-height:1.45}
+#stats{margin-top:8px;font-size:11px;color:#8fa997}
+#exit{position:absolute;right:18px;top:18px;pointer-events:auto;cursor:pointer;padding:10px 18px;border-radius:9px;border:1px solid #edf5ef;background:linear-gradient(#f7fff8,#b9c8bd);color:#07100b;font-weight:900}
+#exit:hover{filter:brightness(1.08);transform:translateY(-1px)}
+#controls{position:absolute;left:50%;bottom:17px;transform:translateX(-50%);padding:9px 14px;border-radius:10px;color:#a8bdaa;font-size:11px;white-space:nowrap}
+#hint{position:absolute;right:18px;bottom:18px;padding:11px 14px;border-radius:10px;color:#b9cbbd;font-size:11px}
+#overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(2,9,6,.72);pointer-events:auto}
+#modal{width:min(520px,90vw);padding:34px;border-radius:18px;text-align:center}
+#modal h1{margin:0 0 10px;font-size:34px}
+#modal p{color:#b9cbbd;line-height:1.55}
+.action{margin-top:13px;padding:10px 19px;border-radius:9px;font-weight:900;cursor:pointer}
+#restart{background:#102219;color:#edf8ef;border:1px solid #55765f}
+#back{margin-left:8px;background:linear-gradient(#f7fff8,#b9c8bd);border:1px solid #fff;color:#07100b}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+ <div id="mission" class="panel">
+  <div class="kicker">PLAYGUMAI // ISLAND AFTERGLOW</div>
+  <div id="title">SUNSET ISLAND</div>
+  <div id="objective">Restore the island's three little landmarks.</div>
+  <div id="stats">Shells: <span id="shells">0/6</span> · Flowers: <span id="flowers">0/3</span> · Coins: <span id="coins">0</span></div>
+ </div>
+ <button id="exit">EXIT GAME</button>
+ <div id="controls" class="panel">WASD / ARROWS MOVE · SPACE INTERACT · E PICK UP / PLANT</div>
+ <div id="hint" class="panel">Explore the island and make it feel alive.</div>
+</div>
+
+<div id="overlay">
+ <div id="modal" class="panel">
+  <h1 id="resultTitle"></h1>
+  <p id="resultText"></p>
+  <button id="restart" class="action">PLAY AGAIN</button>
+  <button id="back" class="action">EXIT GAME</button>
+ </div>
+</div>
+
+<script>
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+let W=innerWidth,H=innerHeight,dpr=1;
+function resize(){W=innerWidth;H=innerHeight;dpr=Math.min(devicePixelRatio||1,2);canvas.width=W*dpr;canvas.height=H*dpr;canvas.style.width=W+"px";canvas.style.height=H+"px";ctx.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener("resize",resize);resize();
+
+const keys={};
+addEventListener("keydown",e=>{keys[e.key.toLowerCase()]=true;if(["arrowup","arrowdown","arrowleft","arrowright"," "].includes(e.key.toLowerCase()))e.preventDefault();if(e.key.toLowerCase()==="escape")exitGame()});
+addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+
+let p,trees,rocks,shells,flowers,landmarks,particles,coins,score,finished,win,last=0;
+
+function reset(){
+ p={x:W*.5,y:H*.55,w:24,h:30,speed:190,dir:1};
+ trees=[
+  {x:W*.12,y:H*.28,s:1},{x:W*.22,y:H*.18,s:.8},{x:W*.34,y:H*.31,s:1.1},
+  {x:W*.67,y:H*.23,s:1},{x:W*.82,y:H*.34,s:1.1},{x:W*.9,y:H*.2,s:.8},
+  {x:W*.16,y:H*.76,s:1},{x:W*.77,y:H*.75,s:.9}
+ ];
+ rocks=[
+  {x:W*.42,y:H*.72},{x:W*.58,y:H*.34},{x:W*.72,y:H*.57},
+  {x:W*.3,y:H*.58},{x:W*.88,y:H*.65}
+ ];
+ shells=[
+  {x:W*.27,y:H*.48,on:true},{x:W*.36,y:H*.78,on:true},{x:W*.53,y:H*.24,on:true},
+  {x:W*.63,y:H*.75,on:true},{x:W*.81,y:H*.48,on:true},{x:W*.91,y:H*.76,on:true}
+ ];
+ flowers=[
+  {x:W*.2,y:H*.55,on:false},{x:W*.55,y:H*.62,on:false},{x:W*.74,y:H*.42,on:false}
+ ];
+ landmarks=[
+  {x:W*.12,y:H*.55,name:"CAMPFIRE",done:false,type:"fire"},
+  {x:W*.5,y:H*.18,name:"NOTICE TREE",done:false,type:"tree"},
+  {x:W*.86,y:H*.55,name:"LITTLE PIER",done:false,type:"pier"}
+ ];
+ particles=[];coins=0;score=0;finished=false;win=false;
+ updateUI();document.getElementById("overlay").style.display="none";
+}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+function burst(x,y,n=12){
+ for(let i=0;i<n;i++){let a=Math.random()*Math.PI*2,s=20+Math.random()*90;particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.5+Math.random()*.6})}
+}
+function nearestUnfixed(){
+ return landmarks.find(l=>!l.done && Math.hypot(p.x-l.x,p.y-l.y)<55)
+}
+function interact(){
+ const l=nearestUnfixed();
+ if(l){l.done=true;score+=250;coins+=5;burst(l.x,l.y,28);return}
+ for(const f of flowers)if(!f.on&&dist(p,f)<42){f.on=true;score+=100;burst(f.x,f.y,15);return}
+ for(const s of shells)if(s.on&&dist(p,s)<35){s.on=false;score+=50;burst(s.x,s.y,9);return}
+}
+function update(dt){
+ if(finished)return;
+ let dx=0,dy=0;
+ if(keys.a||keys.arrowleft)dx--;if(keys.d||keys.arrowright)dx++;
+ if(keys.w||keys.arrowup)dy--;if(keys.s||keys.arrowdown)dy++;
+ if(dx||dy){let len=Math.hypot(dx,dy);dx/=len;dy/=len;p.dir=dx<0?-1:dx>0?1:p.dir;p.x+=dx*p.speed*dt;p.y+=dy*p.speed*dt}
+ p.x=Math.max(35,Math.min(W-35,p.x));p.y=Math.max(110,Math.min(H-75,p.y));
+ if(keys.e||keys[" "]){interact();keys.e=keys[" "]=false}
+ if(landmarks.every(l=>l.done)&&flowers.every(f=>f.on)&&shells.every(s=>!s.on)){finished=true;win=true;score+=1000;show()}
+ particles.forEach(q=>{q.x+=q.vx*dt;q.y+=q.vy*dt;q.life-=dt});particles=particles.filter(q=>q.life>0);
+ updateUI();
+}
+function updateUI(){
+ document.getElementById("shells").textContent=(6-shells.filter(s=>s.on).length)+"/6";
+ document.getElementById("flowers").textContent=flowers.filter(f=>f.on).length+"/3";
+ document.getElementById("coins").textContent=coins;
+ document.getElementById("objective").textContent=landmarks.some(l=>!l.done)?"Restore the island's three little landmarks.":flowers.some(f=>!f.on)?"Plant the three waiting flowers.":"Collect every shell and enjoy the finished island.";
+}
+function show(){
+ document.getElementById("resultTitle").textContent="ISLAND COMPLETE";
+ document.getElementById("resultText").textContent="The island is restored. Campfire glowing, flowers planted and every shell found. Final score: "+score+".";
+ document.getElementById("overlay").style.display="flex";
+}
+function draw(){
+ ctx.clearRect(0,0,W,H);
+ const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,"#102c2a");sky.addColorStop(.48,"#7e9e8b");sky.addColorStop(1,"#d2ae83");
+ ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+
+ // sun
+ ctx.shadowBlur=35;ctx.shadowColor="#ffd99c";ctx.fillStyle="#ffe1a7";ctx.beginPath();ctx.arc(W*.78,H*.18,48,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
+
+ // water border
+ ctx.fillStyle="#3d7d83";
+ ctx.fillRect(0,H*.84,W,H*.16);
+ ctx.fillStyle="rgba(255,255,255,.14)";
+ for(let y=H*.87;y<H;y+=20){ctx.beginPath();for(let x=0;x<W;x+=20)ctx.quadraticCurveTo(x+10,y-4,x+20,y);ctx.strokeStyle="rgba(255,255,255,.18)";ctx.stroke()}
+
+ // island
+ ctx.fillStyle="#86ad75";ctx.beginPath();ctx.ellipse(W*.5,H*.54,W*.46,H*.34,0,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle="#a7c98b";ctx.beginPath();ctx.ellipse(W*.5,H*.52,W*.39,H*.27,0,0,Math.PI*2);ctx.fill();
+
+ // paths
+ ctx.strokeStyle="rgba(205,174,125,.7)";ctx.lineWidth=38;ctx.lineCap="round";
+ ctx.beginPath();ctx.moveTo(W*.15,H*.65);ctx.quadraticCurveTo(W*.5,H*.45,W*.85,H*.62);ctx.stroke();
+ ctx.lineWidth=18;ctx.strokeStyle="rgba(224,198,151,.75)";
+ ctx.beginPath();ctx.moveTo(W*.15,H*.65);ctx.quadraticCurveTo(W*.5,H*.45,W*.85,H*.62);ctx.stroke();
+
+ // trees
+ trees.forEach(t=>{
+  ctx.save();ctx.translate(t.x,t.y);ctx.scale(t.s,t.s);
+  ctx.fillStyle="#704b32";ctx.fillRect(-8,4,16,36);
+  ctx.fillStyle="#3d754b";ctx.beginPath();ctx.arc(-18,0,25,0,Math.PI*2);ctx.arc(16,-3,28,0,Math.PI*2);ctx.arc(0,-22,31,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#5b925b";ctx.beginPath();ctx.arc(-8,-28,17,0,Math.PI*2);ctx.fill();ctx.restore();
+ });
+
+ // rocks
+ rocks.forEach(r=>{ctx.fillStyle="#718078";ctx.beginPath();ctx.ellipse(r.x,r.y,23,15,-.2,0,Math.PI*2);ctx.fill();ctx.fillStyle="#a3b0a7";ctx.beginPath();ctx.ellipse(r.x-5,r.y-5,10,5,-.2,0,Math.PI*2);ctx.fill()});
+
+ // landmarks
+ landmarks.forEach(l=>{
+  ctx.save();ctx.translate(l.x,l.y);
+  if(l.type==="fire"){
+   ctx.fillStyle="#59402d";ctx.fillRect(-24,9,48,9);
+   ctx.fillStyle=l.done?"#ffb44c":"#62452e";ctx.beginPath();ctx.arc(0,2,18,0,Math.PI*2);ctx.fill();
+   if(l.done){ctx.shadowBlur=25;ctx.shadowColor="#ff9b45";ctx.fillStyle="#ffd47a";ctx.beginPath();ctx.moveTo(0,-25);ctx.lineTo(13,5);ctx.lineTo(0,17);ctx.lineTo(-13,5);ctx.closePath();ctx.fill();ctx.shadowBlur=0}
+  }else if(l.type==="tree"){
+   ctx.fillStyle="#755036";ctx.fillRect(-7,-10,14,38);
+   ctx.fillStyle=l.done?"#487c4c":"#536858";ctx.beginPath();ctx.arc(0,-18,28,0,Math.PI*2);ctx.fill();
+   if(l.done){ctx.fillStyle="#f3d38a";ctx.beginPath();ctx.arc(-12,-20,5,0,Math.PI*2);ctx.arc(10,-11,5,0,Math.PI*2);ctx.fill()}
+  }else{
+   ctx.fillStyle="#9b704d";for(let i=-2;i<=2;i++)ctx.fillRect(i*13,-4,10,55);
+   ctx.fillStyle="#b98b5e";ctx.fillRect(-34,8,68,9);
+   if(l.done){ctx.fillStyle="#dce9dc";ctx.fillRect(-8,-25,16,17);ctx.fillStyle="#54745b";ctx.fillRect(-5,-22,10,10)}
+  }
+  ctx.fillStyle="#fff";ctx.font="bold 9px Arial";ctx.textAlign="center";ctx.fillText(l.done?"RESTORED":l.name,0,55);ctx.restore();
+ });
+
+ // flowers
+ flowers.forEach(f=>{
+  ctx.fillStyle="#5b8c52";ctx.fillRect(f.x-2,f.y,4,15);
+  ctx.fillStyle=f.on?"#ffd1dc":"#9aa49b";
+  for(let a=0;a<5;a++){let ang=a*Math.PI*2/5;ctx.beginPath();ctx.arc(f.x+Math.cos(ang)*6,f.y,5,0,Math.PI*2);ctx.fill()}
+  ctx.fillStyle="#ffe19a";ctx.beginPath();ctx.arc(f.x,f.y,4,0,Math.PI*2);ctx.fill();
+ });
+
+ // shells
+ shells.forEach(s=>{if(!s.on)return;ctx.fillStyle="#f2e3d1";ctx.beginPath();ctx.arc(s.x,s.y,9,Math.PI,Math.PI*2);ctx.fill();ctx.strokeStyle="#aa9481";ctx.stroke();ctx.beginPath();ctx.moveTo(s.x-7,s.y);ctx.lineTo(s.x+7,s.y);ctx.stroke()});
+
+ // particles
+ particles.forEach(q=>{ctx.globalAlpha=Math.max(0,q.life);ctx.fillStyle="#ffe0a0";ctx.fillRect(q.x,q.y,3,3)});ctx.globalAlpha=1;
+
+ // player
+ ctx.save();ctx.translate(p.x,p.y);
+ ctx.fillStyle="#d8eee0";ctx.beginPath();ctx.arc(0,-13,10,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle="#b9d5c0";ctx.fillRect(-11,-4,22,24);
+ ctx.fillStyle="#d9b58d";ctx.fillRect(-14,18,10,8);ctx.fillRect(4,18,10,8);
+ ctx.fillStyle="#244337";ctx.fillRect(-7,-16,14,7);
+ ctx.fillStyle="#f0c99d";ctx.fillRect(p.dir*7,-12,3,3);
+ ctx.restore();
+
+ // interaction prompt
+ const near=nearestUnfixed();
+ if(near){ctx.fillStyle="rgba(5,12,8,.78)";ctx.fillRect(near.x-55,near.y-78,110,25);ctx.fillStyle="#eef8ef";ctx.font="bold 11px Arial";ctx.textAlign="center";ctx.fillText("SPACE  "+near.name,near.x,near.y-61)}
+}
+function loop(t){const dt=Math.min(.033,(t-last)/1000);last=t;update(dt);draw();requestAnimationFrame(loop)}
+function exitGame(){if(history.length>1)history.back();else location.href="/"}
+document.getElementById("exit").onclick=exitGame;
+document.getElementById("back").onclick=exitGame;
+document.getElementById("restart").onclick=reset;
+reset();last=performance.now();requestAnimationFrame(loop);
+</script>
+</body>
+</html>
