@@ -15,9 +15,7 @@ export default defineConfig(({ mode }) => {
     sourcemap: emitSourcemaps ? 'inline' : false,
     minify: !emitSourcemaps,
   },
-      sourcemap: emitSourcemaps ? 'inline' : false,
-      minify: !emitSourcemaps,
-    },
+      
     plugins: [
       react(),
       tailwindcss(),
