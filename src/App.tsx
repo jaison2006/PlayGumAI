@@ -169,7 +169,26 @@ const PROFILES: Record<string, GameProfile> = {
 function Logo({ size = 36, showText = false }: { size?: number; showText?: boolean }) {
   return (
     <div className="flex items-center gap-3">
-      <img src="/PlayGumAI/image.png" alt="PlayGumAI" style={{ width: size, height: size, objectFit: 'contain' }} />
+      <div
+        aria-label="PlayGumAI"
+        style={{
+          width: size,
+          height: size,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: '1px solid rgba(229,229,229,0.35)',
+          color: '#e5e5e5',
+          fontFamily: 'Orbitron, sans-serif',
+          fontWeight: 900,
+          fontSize: size * 0.28,
+          letterSpacing: '-0.05em',
+          background: '#080808',
+          boxSizing: 'border-box'
+        }}
+      >
+        PG
+      </div>
       {showText && (
         <span className="font-orbitron font-bold text-lg metallic-text tracking-wide">playGumAi</span>
       )}
@@ -217,8 +236,7 @@ function Landing({ onSubmit }: { onSubmit: (p: string) => void }) {
 
       {/* Hero logo */}
       <div className="animate-float mb-10">
-        <img src="/PlayGumAI/image.png" alt="PlayGumAI" className="w-28 h-28 object-contain" style={{ filter: 'drop-shadow(0 0 30px rgba(229,229,229,0.15))' }} />
-      </div>
+        </div>
 
       <div className="animate-fade-up text-center max-w-3xl">
         <p className="font-orbitron text-xs tracking-widest mb-6" style={{ color: '#555', letterSpacing: '0.3em' }}>AI-POWERED GAME DISCOVERY + CREATION</p>
@@ -283,7 +301,6 @@ function Analyzing({ prompt }: { prompt: string }) {
   }, [])
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 pt-20">
-      <img src="/PlayGumAI/image.png" alt="PlayGumAI" className="w-20 h-20 object-contain mb-8 animate-glow" style={{ filter: 'drop-shadow(0 0 20px rgba(229,229,229,0.2))' }} />
       <div className="w-full max-w-xl card-dark p-6 mb-8" style={{ borderRadius: 2 }}>
         <p className="text-xs mb-1" style={{ color: '#555', fontFamily: 'Inter, sans-serif' }}>YOUR PROMPT</p>
         <p className="text-sm leading-relaxed" style={{ color: '#cfcfcf' }}>{prompt}</p>
@@ -504,7 +521,6 @@ function Generating({ profile, onDone }: { profile: GameProfile; onDone: () => v
     <div className="min-h-screen pt-24 pb-16 px-6 flex flex-col items-center justify-center">
       <div className="max-w-lg w-full">
         <div className="text-center mb-10 animate-fade-up">
-          <img src="/PlayGumAI/image.png" alt="PlayGumAI" className="w-14 h-14 object-contain mx-auto mb-6" style={{ animation: done ? 'none' : 'spin-slow 4s linear infinite', filter: 'drop-shadow(0 0 20px rgba(229,229,229,0.3))' }} />
           <h2 className="font-orbitron font-black text-2xl metallic-text mb-2">
             {done ? 'Your game is ready.' : 'Building your experience...'}
           </h2>
