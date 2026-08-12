@@ -1030,72 +1030,72 @@ export default function App() {
     onGap={() => nav('gap')}
     onPlay={(gameTitle) => {
   if (gameTitle === 'Lone Echo II') {
-    window.location.href = '/games/lon.html'
+    window.location.href = '/PlayGumAI/games/lon.html'
     return
   }
 
   if (gameTitle === 'Metroid Dread') {
-    window.location.href = '/games/meteroid.html'
+    window.location.href = '/PlayGumAI/games/meteroid.html'
     return
   }
 
   if (gameTitle === 'Monument Valley 2') {
-    window.location.href = '/games/monument.html'
+    window.location.href = '/PlayGumAI/games/monument.html'
     return
   }
 
   if (gameTitle === 'Unpacking') {
-    window.location.href = '/games/unpacking.html'
+    window.location.href = '/PlayGumAI/games/unpacking.html'
     return
   }
 
   if (gameTitle === 'A Little to the Left') {
-    window.location.href = '/games/a_little_to_the_left.html'
+    window.location.href = '/PlayGumAI/games/a_little_to_the_left.html'
     return
   }
 
   if (gameTitle === 'Ghostrunner 2') {
-  window.location.href = '/games/ghostrunner2.html'
+  window.location.href = '/PlayGumAI/games/ghostrunner2.html'
   return
 }
 
 if (gameTitle === 'Ruiner') {
-  window.location.href = '/games/ruiner.html'
+  window.location.href = '/PlayGumAI/games/ruiner.html'
   return
 }
 
 if (gameTitle === 'Neon Abyss') {
-  window.location.href = '/games/neon_abyss.html'
+  window.location.href = '/PlayGumAI/games/neon_abyss.html'
   return
 }
 
 if (gameTitle === 'Hollow Knight') {
-  window.location.href = '/games/hollow_knight.html'
+  window.location.href = '/PlayGumAI/games/hollow_knight.html'
   return
 }
 
 if (gameTitle === 'Ori and the Will of the Wisps') {
-  window.location.href = '/games/ori_and_the_will_of_the_wisps.html'
+  window.location.href = '/PlayGumAI/games/ori_and_the_will_of_the_wisps.html'
   return
 }
 
 if (gameTitle === 'Dead Cells: Return to Castlevania') {
-  window.location.href = '/games/dead_cells_return_to_castlevania.html'
+  window.location.href = '/PlayGumAI/games/dead_cells_return_to_castlevania.html'
   return
 }
 
 if (gameTitle === 'Animal Crossing: New Horizons') {
-  window.location.href = '/games/animal_crossing_new_horizons.html'
+  window.location.href = '/PlayGumAI/games/animal_crossing_new_horizons.html'
   return
 }
 
 if (gameTitle === 'Stardew Valley') {
-  window.location.href = '/games/stardew_valley.html'
+  window.location.href = '/PlayGumAI/games/stardew_valley.html'
   return
 }
 
 if (gameTitle === 'Overcooked! 2') {
-  window.location.href = '/games/overcooked_2.html'
+  window.location.href = '/PlayGumAI/games/overcooked_2.html'
   return
 }
 
@@ -1107,7 +1107,7 @@ if (gameTitle === 'Overcooked! 2') {
       {screen === 'generating' && <Generating profile={profile} onDone={() => nav('game')} />}
       {screen === 'game' && <Game onExit={() => nav('landing')} onRemix={() => nav('remix')} />}
       {screen === 'remix' && <Remix onDone={() => nav('passport')} />}
-      {screen === 'passport' && <Passport onPlay={() => window.location.href = '/games/astronaut_lost_planet.html'} />}
+      {screen === 'passport' && <Passport onPlay={() => window.location.href = '/PlayGumAI/games/astronaut_lost_planet.html'} />}
       {screen === 'discover' && <Discover onStart={() => nav('landing')} />}
     </div>
   )
